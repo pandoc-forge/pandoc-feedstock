@@ -10,12 +10,12 @@ Builds [pandoc](https://pandoc.org) from source for the `pandoc-forge` conda cha
 ## Install
 
 ```sh
-pixi add --channel https://prefix.dev/pandoc-forge --channel conda-forge pandoc
+pixi add --channel https://prefix.dev/ickc/pandoc-forge --channel conda-forge pandoc
 # or
-conda install -c https://prefix.dev/pandoc-forge -c conda-forge pandoc
+conda install -c https://prefix.dev/ickc/pandoc-forge -c conda-forge pandoc
 ```
 
-Pre-release and test builds go to `https://prefix.dev/pandoc-forge-dev`.
+Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 
 `pandoc-forge` builds have build strings matching `*pandoc_forge*`. To require them over conda-forge's, use the spec `pandoc * *pandoc_forge*`.
 
@@ -36,7 +36,8 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge-dev`.
 
 - Pushes to `main` upload whatever built to `pandoc-forge-dev`.
 - Releases to `pandoc-forge` are manual: run the workflow from `main` with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main`, and prefix.dev only accepts uploads to `pandoc-forge` from that environment.
-- Uploads use prefix.dev trusted publishing (no API keys) and never overwrite: a fix to a published version needs a new `build_number`.
+- Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new `build_number`.
+- Channels live under the `ickc` namespace on prefix.dev. Set the repo variable `PREFIX_OWNER` if they move.
 
 ## Updating
 

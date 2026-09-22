@@ -166,7 +166,7 @@ jobs:
       contents: read
       id-token: write # trusted publishing to prefix.dev
     env:
-      CHANNEL: pandoc-forge-dev
+      CHANNEL: ${{ vars.PREFIX_OWNER || 'ickc' }}/pandoc-forge-dev
     steps:
       - uses: actions/download-artifact@v8.0.1
         with:
@@ -188,19 +188,24 @@ jobs:
           python3 -c 'import base64, sys; p = sys.argv[1].split(".")[1]; print(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)).decode())' "$token" |
             jq '{sub, repository, repository_owner, workflow_ref, job_workflow_ref, ref, environment, event_name}'
 
-      # Trusted publishing is the default. prefix.dev does not yet accept the
-      # immutable OIDC subject (repo:owner@id/repo@id) that GitHub forces on
-      # repos created after 2026-07-15, so an API key in PREFIX_API_KEY (repo
-      # secret for dev, `release` environment secret for release) takes
-      # precedence while it is set. Delete the secrets once prefix.dev fixes it.
+      # Trusted publishing first; if prefix.dev refuses it, fall back to the
+      # API key in the PREFIX_API_KEY secret (repo secret for dev, `release`
+      # environment secret for release), if there is one.
       - name: Upload to prefix.dev
         env:
           API_KEY: ${{ secrets.PREFIX_API_KEY }}
         run: |
-          if [[ -n $API_KEY ]]; then export PREFIX_API_KEY=$API_KEY; fi
-          find packages -name '*.conda' -print
-          find packages -name '*.conda' -print0 |
-            xargs -0 rattler-build upload -vv prefix --channel "$CHANNEL" --skip-existing
+          mapfile -d '' pkgs < <(find packages -name '*.conda' -print0)
+          printf '%s\n' "${pkgs[@]}"
+          upload() { rattler-build upload prefix --channel "$CHANNEL" --skip-existing "${pkgs[@]}"; }
+          if upload; then
+            echo "::notice::Uploaded to $CHANNEL with trusted publishing"
+          elif [[ -n $API_KEY ]]; then
+            echo "::warning::Trusted publishing to $CHANNEL failed; retrying with PREFIX_API_KEY"
+            PREFIX_API_KEY=$API_KEY upload
+          else
+            exit 1
+          fi
 
   # The main channel only takes a manual run from main in which every platform
   # built. prefix.dev only trusts this job's token for pandoc-forge because it
@@ -217,7 +222,7 @@ jobs:
       contents: read
       id-token: write # trusted publishing to prefix.dev
     env:
-      CHANNEL: pandoc-forge
+      CHANNEL: ${{ vars.PREFIX_OWNER || 'ickc' }}/pandoc-forge
     steps:
       - uses: actions/download-artifact@v8.0.1
         with:
@@ -239,16 +244,21 @@ jobs:
           python3 -c 'import base64, sys; p = sys.argv[1].split(".")[1]; print(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)).decode())' "$token" |
             jq '{sub, repository, repository_owner, workflow_ref, job_workflow_ref, ref, environment, event_name}'
 
-      # Trusted publishing is the default. prefix.dev does not yet accept the
-      # immutable OIDC subject (repo:owner@id/repo@id) that GitHub forces on
-      # repos created after 2026-07-15, so an API key in PREFIX_API_KEY (repo
-      # secret for dev, `release` environment secret for release) takes
-      # precedence while it is set. Delete the secrets once prefix.dev fixes it.
+      # Trusted publishing first; if prefix.dev refuses it, fall back to the
+      # API key in the PREFIX_API_KEY secret (repo secret for dev, `release`
+      # environment secret for release), if there is one.
       - name: Upload to prefix.dev
         env:
           API_KEY: ${{ secrets.PREFIX_API_KEY }}
         run: |
-          if [[ -n $API_KEY ]]; then export PREFIX_API_KEY=$API_KEY; fi
-          find packages -name '*.conda' -print
-          find packages -name '*.conda' -print0 |
-            xargs -0 rattler-build upload -vv prefix --channel "$CHANNEL" --skip-existing
+          mapfile -d '' pkgs < <(find packages -name '*.conda' -print0)
+          printf '%s\n' "${pkgs[@]}"
+          upload() { rattler-build upload prefix --channel "$CHANNEL" --skip-existing "${pkgs[@]}"; }
+          if upload; then
+            echo "::notice::Uploaded to $CHANNEL with trusted publishing"
+          elif [[ -n $API_KEY ]]; then
+            echo "::warning::Trusted publishing to $CHANNEL failed; retrying with PREFIX_API_KEY"
+            PREFIX_API_KEY=$API_KEY upload
+          else
+            exit 1
+          fi
