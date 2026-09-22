@@ -1,0 +1,37 @@
+# Packages pandoc.wasm staged by scripts/build-wasm.sh in dist/pandoc-wasm.
+# pandoc.wasm is a WASI module, the same on every platform, so this is a
+# noarch package. Run it with any WASI runtime, e.g.
+#
+#   wasmtime run "$CONDA_PREFIX/share/pandoc-wasm/pandoc.wasm" --version
+context:
+  version: ${{ env.get("PANDOC_VERSION") }}
+  build_number: 0
+
+package:
+  name: pandoc-wasm
+  version: ${{ version }}
+
+source:
+  path: ../../dist/pandoc-wasm
+  use_gitignore: false
+
+build:
+  number: ${{ build_number }}
+  noarch: generic
+  script:
+    - mkdir -p "$PREFIX/share/pandoc-wasm"
+    - cp pandoc.wasm "$PREFIX/share/pandoc-wasm/pandoc.wasm"
+
+tests:
+  - package_contents:
+      files:
+        - share/pandoc-wasm/pandoc.wasm
+
+about:
+  homepage: https://pandoc.org/app/
+  repository: https://github.com/jgm/pandoc
+  license: GPL-2.0-or-later
+  license_file:
+    - COPYING.md
+    - COPYRIGHT
+  summary: Pandoc compiled to WebAssembly (WASI)

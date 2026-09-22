@@ -1,0 +1,183 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: prefix.dev channel to upload to
+        type: choice
+        options:
+          - pandoc-forge-dev
+          - pandoc-forge
+        default: pandoc-forge-dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GHC_VERSION: "9.10"
+  CABAL_VERSION: "3.14"
+  # Same image upstream uses for its static Linux release builds.
+  GHC_MUSL_IMAGE: quay.io/benz0li/ghc-musl:9.10
+  RATTLER_BUILD_VERSION: v0.76.1
+
+jobs:
+  native:
+    name: pandoc (${{ matrix.subdir }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { subdir: linux-64, os: ubuntu-24.04 }
+          - { subdir: linux-aarch64, os: ubuntu-24.04-arm }
+          - { subdir: osx-64, os: macos-15-intel }
+          - { subdir: osx-arm64, os: macos-15 }
+          - { subdir: win-64, os: windows-2022 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pandoc version
+        run: echo "PANDOC_VERSION=$(cat PANDOC_VERSION)" >> "$GITHUB_ENV"
+
+      - name: Fetch pandoc source
+        run: git clone --depth 1 --branch "$PANDOC_VERSION" https://github.com/jgm/pandoc pandoc-src
+
+      - name: Set up GHC
+        if: runner.os != 'Linux'
+        id: ghc
+        uses: haskell-actions/setup@v2.12.1
+        with:
+          ghc-version: ${{ env.GHC_VERSION }}
+          cabal-version: ${{ env.CABAL_VERSION }}
+
+      - name: Locate cabal store
+        id: store
+        run: |
+          if [[ $RUNNER_OS == Linux ]]; then
+            # HOME inside the build container
+            echo "path=$HOME/cabal-home" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=${{ steps.ghc.outputs.cabal-store }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore cabal store
+        id: cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-${{ hashFiles('pandoc-src/cabal.project', 'pandoc-src/**/*.cabal') }}
+          restore-keys: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-
+
+      - name: Build pandoc (static, in Alpine container)
+        if: runner.os == 'Linux'
+        env:
+          CABALOPTS: -f-export-dynamic --enable-executable-static -j4
+          GHCOPTS: -j4 +RTS -A256m -RTS -split-sections -optc-Os -optl=-pthread
+        run: |
+          mkdir -p "$HOME/cabal-home"
+          docker run --rm \
+            -v "$PWD:/work" -v "$HOME/cabal-home:/cabal-home" -w /work \
+            -e HOME=/cabal-home -e CABALOPTS -e GHCOPTS \
+            --user "$(id -u):$(id -g)" \
+            "$GHC_MUSL_IMAGE" \
+            bash -c 'git config --global --add safe.directory "*" && bash scripts/build-native.sh pandoc-src dist/pandoc'
+
+      - name: Build pandoc
+        if: runner.os != 'Linux'
+        run: bash scripts/build-native.sh pandoc-src dist/pandoc
+
+      - name: Save cabal store
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Package
+        uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
+          recipe-path: recipes/pandoc/recipe.yaml
+          artifact-name: conda-${{ matrix.subdir }}
+
+  wasm:
+    name: pandoc-wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pandoc version
+        run: echo "PANDOC_VERSION=$(cat PANDOC_VERSION)" >> "$GITHUB_ENV"
+
+      - name: Fetch pandoc source
+        run: git clone --depth 1 --branch "$PANDOC_VERSION" https://github.com/jgm/pandoc pandoc-src
+
+      - name: Restore wasm cabal store
+        id: cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.ghc-wasm/.cabal
+          key: cabal-wasm-${{ hashFiles('pandoc-src/flake.lock', 'pandoc-src/cabal.project', 'pandoc-src/**/*.cabal') }}
+          restore-keys: cabal-wasm-
+
+      - name: Build pandoc.wasm
+        run: bash scripts/build-wasm.sh pandoc-src dist/pandoc-wasm
+
+      - name: Save wasm cabal store
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.ghc-wasm/.cabal
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Package
+        uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
+          recipe-path: recipes/pandoc-wasm/recipe.yaml
+          artifact-name: conda-noarch
+
+  upload:
+    needs: [native, wasm]
+    # Pushes to main go to the dev channel, whatever built. The main channel
+    # only takes a manual run in which every platform built.
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' &&
+      (inputs.channel != 'pandoc-forge' ||
+       (needs.native.result == 'success' && needs.wasm.result == 'success'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # trusted publishing to prefix.dev
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: conda-*
+          path: packages
+          merge-multiple: true
+
+      - uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
+          setup-only: true
+
+      - name: Upload to prefix.dev
+        env:
+          CHANNEL: ${{ inputs.channel || 'pandoc-forge-dev' }}
+        run: |
+          find packages -name '*.conda' -print
+          find packages -name '*.conda' -print0 |
+            xargs -0 rattler-build upload prefix --channel "$CHANNEL" --skip-existing

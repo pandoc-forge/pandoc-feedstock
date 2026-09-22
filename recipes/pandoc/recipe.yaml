@@ -1,0 +1,57 @@
+# Packages the pandoc binary staged by scripts/build-native.sh in dist/pandoc.
+# The version comes from PANDOC_VERSION at the repository root, which CI
+# exports; locally:
+#
+#   PANDOC_VERSION=$(cat PANDOC_VERSION) rattler-build build -r recipes/pandoc
+context:
+  version: ${{ env.get("PANDOC_VERSION") }}
+  build_number: 0
+
+package:
+  name: pandoc
+  version: ${{ version }}
+
+source:
+  path: ../../dist/pandoc
+  use_gitignore: false
+
+build:
+  number: ${{ build_number }}
+  # The build string marks pandoc-forge builds, so that other packages can
+  # require them with `pandoc * *pandoc_forge*`.
+  string: pandoc_forge_${{ build_number }}
+  script:
+    - if: unix
+      then:
+        - mkdir -p "$PREFIX/bin" "$PREFIX/share/man/man1"
+        - install -m 755 bin/pandoc "$PREFIX/bin/pandoc"
+        - ln -s pandoc "$PREFIX/bin/pandoc-lua"
+        - ln -s pandoc "$PREFIX/bin/pandoc-server"
+        - cp share/man/man1/*.1 "$PREFIX/share/man/man1/"
+      else:
+        - if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+        - copy bin\pandoc.exe "%LIBRARY_BIN%\pandoc.exe"
+
+tests:
+  - script:
+      - pandoc --version
+      - if: unix
+        then:
+          - pandoc --version | grep -q '+server +lua'
+          - echo '# Hello' | pandoc -t html | grep -q '<h1 id="hello">Hello</h1>'
+          - pandoc-lua -e 'assert(tostring(pandoc.types.Version(PANDOC_VERSION)) == "${{ version }}")'
+          - pandoc-server --version
+
+about:
+  homepage: https://pandoc.org
+  repository: https://github.com/jgm/pandoc
+  documentation: https://pandoc.org/MANUAL.html
+  license: GPL-2.0-or-later
+  license_file:
+    - COPYING.md
+    - COPYRIGHT
+  summary: Universal markup converter
+  description: |
+    Pandoc converts between markup formats: Markdown, HTML, LaTeX, docx,
+    EPUB, typst and many more. Built from source by pandoc-forge as a static
+    binary with embedded data files and the Lua engine and server included.
