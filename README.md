@@ -35,7 +35,7 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge-dev`.
 ## Publishing
 
 - Pushes to `main` upload whatever built to `pandoc-forge-dev`.
-- Releases to `pandoc-forge` are manual: run the workflow with `channel: pandoc-forge`. It uploads only if every platform built.
+- Releases to `pandoc-forge` are manual: run the workflow from `main` with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main`, and prefix.dev only accepts uploads to `pandoc-forge` from that environment.
 - Uploads use prefix.dev trusted publishing (no API keys) and never overwrite: a fix to a published version needs a new `build_number`.
 
 ## Updating
