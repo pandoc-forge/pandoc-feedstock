@@ -179,11 +179,20 @@ jobs:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
           setup-only: true
 
+      # The claims prefix.dev matches against its trusted publisher settings;
+      # the token itself is never printed.
+      - name: Show OIDC claims
+        run: |
+          token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=prefix.dev" | jq -r .value)
+          cut -d. -f2 <<<"$token" | tr '_-' '/+' | base64 -d 2>/dev/null |
+            jq '{sub, repository, repository_owner, workflow_ref, job_workflow_ref, ref, environment, event_name}'
+
       - name: Upload to prefix.dev
         run: |
           find packages -name '*.conda' -print
           find packages -name '*.conda' -print0 |
-            xargs -0 rattler-build upload prefix --channel "$CHANNEL" --skip-existing
+            xargs -0 rattler-build upload -vv prefix --channel "$CHANNEL" --skip-existing
 
   # The main channel only takes a manual run from main in which every platform
   # built. prefix.dev only trusts this job's token for pandoc-forge because it
@@ -213,8 +222,17 @@ jobs:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
           setup-only: true
 
+      # The claims prefix.dev matches against its trusted publisher settings;
+      # the token itself is never printed.
+      - name: Show OIDC claims
+        run: |
+          token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=prefix.dev" | jq -r .value)
+          cut -d. -f2 <<<"$token" | tr '_-' '/+' | base64 -d 2>/dev/null |
+            jq '{sub, repository, repository_owner, workflow_ref, job_workflow_ref, ref, environment, event_name}'
+
       - name: Upload to prefix.dev
         run: |
           find packages -name '*.conda' -print
           find packages -name '*.conda' -print0 |
-            xargs -0 rattler-build upload prefix --channel "$CHANNEL" --skip-existing
+            xargs -0 rattler-build upload -vv prefix --channel "$CHANNEL" --skip-existing
