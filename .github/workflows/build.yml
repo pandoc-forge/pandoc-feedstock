@@ -2,7 +2,8 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    # main builds the latest pandoc; v* branches (v3.8.x, ...) maintain older ones
+    branches: [main, 'v*']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -208,14 +209,14 @@ jobs:
             exit 1
           fi
 
-  # The main channel only takes a manual run from main in which every platform
-  # built. prefix.dev only trusts this job's token for pandoc-forge because it
+  # The main channel only takes a manual run from main or a v* branch in which
+  # every platform built. prefix.dev only trusts this job's token for pandoc-forge because it
   # runs in the `release` environment.
   upload-release:
     needs: [native, wasm]
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.channel == 'pandoc-forge' &&
-      github.ref == 'refs/heads/main' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v')) &&
       needs.native.result == 'success' && needs.wasm.result == 'success'
     runs-on: ubuntu-24.04
     environment: release

@@ -35,7 +35,11 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 ## Publishing
 
 - Pushes to `main` upload whatever built to `pandoc-forge-dev`.
-- Releases to `pandoc-forge` are manual: run the workflow from `main` with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main`, and prefix.dev only accepts uploads to `pandoc-forge` from that environment.
+- Releases to `pandoc-forge` are manual: run the workflow from `main` or a `v*` branch with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main` and `v*`.
+
+## Older pandoc versions
+
+`main` builds the latest pandoc. Each older version that downstream packages pin (for example quarto's exact `pandoc 3.8.3`) lives on a `v<major>.<minor>.x` branch, which differs from `main` only in `pins.env`. Changes to the build are made on `main` and merged into the branches.
 - Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new `build_number`.
 - The target channels default to `ickc/pandoc-forge-dev` and `ickc/pandoc-forge`. The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
 
