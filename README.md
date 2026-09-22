@@ -21,7 +21,7 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 
 ## How it builds
 
-`PANDOC_VERSION` names the jgm/pandoc tag to build. `.github/workflows/build.yml` ports upstream's release builds to GitHub Actions:
+`pins.env` holds everything that determines a build: the jgm/pandoc tag (`PANDOC_VERSION`), the Hackage snapshot (`INDEX_STATE`, upstream's release time for that tag), the exact GHC and cabal versions, and the Linux build image by digest. `.github/workflows/build.yml` ports upstream's release builds to GitHub Actions:
 
 | Target | Runner | Method (as upstream) |
 |---|---|---|
@@ -37,9 +37,9 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 - Pushes to `main` upload whatever built to `pandoc-forge-dev`.
 - Releases to `pandoc-forge` are manual: run the workflow from `main` with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main`, and prefix.dev only accepts uploads to `pandoc-forge` from that environment.
 - Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new `build_number`.
-- Channels live under the `ickc` namespace on prefix.dev. Set the repo variable `PREFIX_OWNER` if they move.
+- The target channels default to `ickc/pandoc-forge-dev` and `ickc/pandoc-forge`. The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
 
 ## Updating
 
-- **New pandoc release:** update `PANDOC_VERSION`, and reset `build_number` to 0 in both recipes.
+- **New pandoc release:** update `pins.env` (version, index-state, and toolchain if upstream changed it), and reset `build_number` to 0 in both recipes.
 - **Packaging change for the same pandoc version:** bump `build_number` instead.

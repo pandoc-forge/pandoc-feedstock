@@ -7,7 +7,8 @@
 # Uses the GHC wasm toolchain (ghc-wasm-meta) at the revision pinned in
 # pandoc's own flake.lock, so each pandoc release is built with the toolchain
 # upstream used for it. Installs the toolchain to $GHC_WASM_PREFIX
-# (default ~/.ghc-wasm) unless it is already there.
+# (default ~/.ghc-wasm) unless it is already there. The Hackage snapshot
+# comes from $INDEX_STATE (see pins.env).
 set -euo pipefail
 
 src=$(cd "$1" && pwd)
@@ -34,6 +35,10 @@ fi
 # shellcheck disable=SC1091
 source "$prefix/env"
 cd "$src"
+# Pin the Hackage snapshot used for dependency resolution.
+if [[ -n ${INDEX_STATE:-} ]]; then
+	echo "index-state: $INDEX_STATE" >cabal.project.local
+fi
 make pandoc.wasm
 
 cp pandoc.wasm COPYING.md COPYRIGHT "$out/"

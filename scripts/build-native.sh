@@ -7,7 +7,8 @@
 #
 # Mirrors jgm/pandoc's release builds (linux/make_artifacts.sh,
 # macos/make_macos_release.sh, .github/workflows/release-candidate.yml).
-# Extra cabal and GHC options come from $CABALOPTS and $GHCOPTS.
+# Extra cabal and GHC options come from $CABALOPTS and $GHCOPTS, and the
+# Hackage snapshot from $INDEX_STATE (see pins.env).
 set -euo pipefail
 
 src=$(cd "$1" && pwd)
@@ -23,6 +24,10 @@ MINGW* | MSYS* | CYGWIN*) exe=.exe ;;
 esac
 
 cd "$src"
+# Pin the Hackage snapshot used for dependency resolution.
+if [[ -n ${INDEX_STATE:-} ]]; then
+	echo "index-state: $INDEX_STATE" >cabal.project.local
+fi
 cabal update
 # shellcheck disable=SC2086
 cabal build $CABALOPTS --ghc-options="$GHCOPTS" pandoc-cli

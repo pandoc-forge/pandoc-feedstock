@@ -1,8 +1,8 @@
 # Packages the pandoc binary staged by scripts/build-native.sh in dist/pandoc.
-# The version comes from PANDOC_VERSION at the repository root, which CI
-# exports; locally:
+# The version comes from PANDOC_VERSION in pins.env, which CI exports;
+# locally:
 #
-#   PANDOC_VERSION=$(cat PANDOC_VERSION) rattler-build build -r recipes/pandoc
+#   (set -a; . ./pins.env; rattler-build build -r recipes/pandoc)
 context:
   version: ${{ env.get("PANDOC_VERSION") }}
   build_number: 0
