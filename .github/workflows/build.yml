@@ -121,7 +121,18 @@ jobs:
       - name: Fetch pandoc source
         run: git clone --depth 1 --branch "$PANDOC_VERSION" https://github.com/jgm/pandoc pandoc-src
 
+      # Upstream builds pandoc.wasm from 3.9 on; older versions have no wasm/.
+      - name: Check for wasm support
+        id: wasm
+        run: |
+          if [[ -d pandoc-src/wasm ]]; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::pandoc $PANDOC_VERSION has no wasm build upstream; skipping pandoc-wasm"
+          fi
+
       - name: Restore wasm cabal store
+        if: steps.wasm.outputs.supported
         id: cache
         uses: actions/cache/restore@v6.1.0
         with:
@@ -132,19 +143,22 @@ jobs:
       # Build tools some dependencies need at configure time (pretty-show,
       # toml-parser). Upstream gets them from its nix dev shell.
       - name: Install alex and happy
+        if: steps.wasm.outputs.supported
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends alex happy
 
       - name: Build pandoc.wasm
+        if: steps.wasm.outputs.supported
         run: bash scripts/build-wasm.sh pandoc-src dist/pandoc-wasm
 
       - name: Save wasm cabal store
-        if: always() && steps.cache.outputs.cache-hit != 'true'
+        if: always() && steps.wasm.outputs.supported && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6.1.0
         with:
           path: ~/.ghc-wasm/.cabal
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Package
+        if: steps.wasm.outputs.supported
         uses: prefix-dev/rattler-build-action@v0.2.39
         with:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
