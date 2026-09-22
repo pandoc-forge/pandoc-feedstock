@@ -40,8 +40,10 @@ cp pandoc.wasm COPYING.md COPYRIGHT "$out/"
 ls -l "$out/pandoc.wasm"
 if command -v wasmtime >/dev/null; then
 	echo "Smoke test with wasmtime..."
-	wasmtime run "$out/pandoc.wasm" --version
-	echo '# Hello' | wasmtime run "$out/pandoc.wasm" -t html | grep -q '<h1 id="hello">Hello</h1>'
+	wasmtime --version
+	# pandoc.wasm uses the exception-handling proposal (for Lua's setjmp/longjmp)
+	wasmtime run -W exceptions=y "$out/pandoc.wasm" --version
+	echo '# Hello' | wasmtime run -W exceptions=y "$out/pandoc.wasm" -t html | grep -q '<h1 id="hello">Hello</h1>'
 else
 	echo "wasmtime not found; skipping smoke test"
 fi
