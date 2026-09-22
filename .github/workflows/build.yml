@@ -133,6 +133,11 @@ jobs:
           key: cabal-wasm-${{ hashFiles('pandoc-src/flake.lock', 'pandoc-src/cabal.project', 'pandoc-src/**/*.cabal') }}
           restore-keys: cabal-wasm-
 
+      # Build tools some dependencies need at configure time (pretty-show,
+      # toml-parser). Upstream gets them from its nix dev shell.
+      - name: Install alex and happy
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends alex happy
+
       - name: Build pandoc.wasm
         run: bash scripts/build-wasm.sh pandoc-src dist/pandoc-wasm
 
