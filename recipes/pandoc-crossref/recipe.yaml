@@ -1,0 +1,63 @@
+# Packages the pandoc-crossref binary staged by scripts/build-crossref.sh in
+# dist/pandoc-crossref. It is built in the same job as pandoc, against the same
+# pandoc library, so it needs exactly this pandoc: pandoc-crossref warns when
+# run through any other pandoc version. The build string records the pandoc
+# version, since the same pandoc-crossref version can be built against several.
+#
+# CI exports CROSSREF_VERSION (from the tag's pandoc-crossref.cabal) and the
+# pins; locally:
+#
+#   (set -a; . ./pins.env; CROSSREF_VERSION=0.3.25 rattler-build build -r recipes/pandoc-crossref)
+context:
+  version: ${{ env.get("CROSSREF_VERSION") }}
+  pandoc_version: ${{ env.get("PANDOC_VERSION") }}
+  build_number: 0
+
+package:
+  name: pandoc-crossref
+  version: ${{ version }}
+
+source:
+  path: ../../dist/pandoc-crossref
+  use_gitignore: false
+
+build:
+  number: ${{ build_number }}
+  string: pandoc${{ pandoc_version | replace(".", "_") }}_pandoc_forge_${{ build_number }}
+  script:
+    - if: unix
+      then:
+        - mkdir -p "$PREFIX/bin"
+        - install -m 755 bin/pandoc-crossref "$PREFIX/bin/pandoc-crossref"
+      else:
+        - if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+        - copy bin\pandoc-crossref.exe "%LIBRARY_BIN%\pandoc-crossref.exe"
+
+requirements:
+  run:
+    - pandoc ==${{ pandoc_version }} *pandoc_forge*
+
+tests:
+  - script:
+      - pandoc-crossref --version
+      - if: unix
+        then:
+          # "{" passed separately: a literal brace-hash would open a Jinja comment
+          - printf '![A figure](a.png)%s#fig:a}\n\nSee @fig:a.\n' '{' > in.md
+          - pandoc -F pandoc-crossref -t plain in.md 2> err.txt > out.txt
+          - cat out.txt err.txt
+          # crossref puts a non-breaking space before the number
+          - grep -q 'See fig\.[^0-9]*1\.' out.txt
+          # no "compiled with pandoc X but is being run through Y" warning
+          - test ! -s err.txt
+
+about:
+  homepage: https://lierdakil.github.io/pandoc-crossref/
+  repository: https://github.com/lierdakil/pandoc-crossref
+  documentation: https://lierdakil.github.io/pandoc-crossref/
+  license: GPL-2.0-or-later
+  license_file: LICENSE
+  summary: Pandoc filter for numbering figures, equations, tables and cross-references to them
+  description: |
+    Built from source by pandoc-forge in the same build as pandoc, against
+    the same pandoc library, and pinned to that exact pandoc version.

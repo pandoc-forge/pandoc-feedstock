@@ -15,17 +15,8 @@ src=$(cd "$1" && pwd)
 mkdir -p "$2"
 out=$(cd "$2" && pwd)
 
-CABALOPTS="-fembed_data_files -fserver -flua ${CABALOPTS:-}"
-# Older pandoc versions (e.g. 3.6.3) have no http flag and always support HTTP.
-if grep -q '^flag http' "$src/pandoc.cabal"; then
-	CABALOPTS="-fhttp $CABALOPTS"
-fi
-GHCOPTS=${GHCOPTS:-}
-
-exe=
-case "$(uname -s)" in
-MINGW* | MSYS* | CYGWIN*) exe=.exe ;;
-esac
+# shellcheck source=scripts/cabal-opts.sh
+. "$(dirname "$0")/cabal-opts.sh"
 
 cd "$src"
 # Pin the Hackage snapshot used for dependency resolution.
