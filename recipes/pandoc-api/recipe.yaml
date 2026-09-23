@@ -1,0 +1,32 @@
+# pandoc-api is an empty package whose version is the pandoc API version
+# (pandoc-types major.minor, e.g. 1.23), like conda-forge's python_abi.
+# Each pandoc build depends on the pandoc-api it speaks, and pandoc-api only
+# allows pandoc-forge's pandoc. Filters depend on both `pandoc` and
+# `pandoc-api 1.23.*`, which gets them a pandoc-forge pandoc with a compatible
+# JSON AST whatever the channel order.
+#
+# CI sets PANDOC_API_VERSION from pandoc.cabal; locally:
+#
+#   PANDOC_API_VERSION=$(scripts/pandoc-api-version.sh pandoc-src) rattler-build build -r recipes/pandoc-api
+context:
+  version: ${{ env.get("PANDOC_API_VERSION") }}
+  build_number: 0
+
+package:
+  name: pandoc-api
+  version: ${{ version }}
+
+build:
+  number: ${{ build_number }}
+  noarch: generic
+  string: pandoc_forge_${{ build_number }}
+
+requirements:
+  run_constraints:
+    - pandoc * *pandoc_forge*
+
+about:
+  homepage: https://github.com/pandoc-forge/pandoc-feedstock
+  repository: https://github.com/pandoc-forge/pandoc-feedstock
+  license: BSD-3-Clause
+  summary: Pins pandoc to pandoc-forge builds speaking pandoc API version ${{ version }}
