@@ -6,7 +6,14 @@ Builds [pandoc](https://pandoc.org) from source for the `pandoc-forge` conda cha
 |---|---|---|
 | `pandoc` | linux-64, linux-aarch64, osx-64, osx-arm64, win-64 | `pandoc` (plus `pandoc-lua` and `pandoc-server` symlinks on Unix) and its man pages. Statically linked on Linux, with data files embedded and `+lua +server +http` |
 | `pandoc-wasm` | noarch | `share/pandoc-wasm/pandoc.wasm`, a WASI module |
+| `pandoc-crossref` | same as `pandoc` | `pandoc-crossref`, statically linked against the same pandoc library as the `pandoc` binary, and pinned to that exact pandoc (`pandoc ==3.11 *pandoc_forge*`). Build strings name the pandoc version, e.g. `pandoc3_11_pandoc_forge_0` |
 | `pandoc-api` | noarch | Nothing. Its version is the pandoc API version (pandoc-types major.minor, e.g. `1.23`) |
+
+## pandoc-crossref
+
+pandoc-crossref is built right after pandoc in the same job, by `scripts/build-crossref.sh`. It freezes pandoc's cabal plan, adds pandoc-crossref (the `CROSSREF_TAG` in `pins.env`) to pandoc's own cabal project, and builds it with the same options. So it links exactly the pandoc library that is in the `pandoc` binary, and only pandoc-crossref and its few extra dependencies get compiled. That means using pandoc's GHC and Hackage snapshot rather than upstream pandoc-crossref's GHC and freeze file.
+
+pandoc-crossref warns whenever it runs through a pandoc other than the one it was compiled with, and its test checks that there is no such warning. A pandoc-crossref failure doesn't stop pandoc being packaged. Releases include pandoc-crossref only if it built on all five platforms.
 
 ## pandoc-api
 
@@ -57,3 +64,4 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 
 - **New pandoc release:** update `pins.env` (version, index-state, and toolchain if upstream changed it), and reset `build_number` to 0 in the `pandoc` and `pandoc-wasm` recipes.
 - **Packaging change for the same pandoc version:** bump `build_number` instead.
+- **New pandoc-crossref release:** on each branch whose pandoc the new tag's `pandoc` bounds admit, set `CROSSREF_TAG` in `pins.env` and reset `build_number` in `recipes/pandoc-crossref` to 0. Its pandoc packages already exist and are skipped on upload.
