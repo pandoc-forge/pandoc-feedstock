@@ -17,7 +17,7 @@ pandoc-crossref warns whenever it runs through a pandoc other than the one it wa
 
 ## pandoc-api
 
-This works like conda-forge's `python_abi`. Each `pandoc` depends on the `pandoc-api` version it speaks, and `pandoc-api` only allows pandoc-forge builds of pandoc (`run_constraints: pandoc * *pandoc_forge*`). A filter that depends on `pandoc` and `pandoc-api 1.23.*` therefore gets a pandoc-forge pandoc whose JSON AST it can read. If a higher-priority channel supplies pandoc instead, the solve fails rather than mixing builds.
+This works like conda-forge's `python_abi`. Each `pandoc` and `pandoc-wasm` depends on the `pandoc-api` version it speaks, and `pandoc-api` only allows pandoc-forge builds of pandoc (`run_constraints: pandoc * *pandoc_forge*`). A filter that depends on `pandoc` and `pandoc-api 1.23.*` therefore gets a pandoc-forge pandoc whose JSON AST it can read. If a higher-priority channel supplies pandoc instead, the solve fails rather than mixing builds.
 
 CI reads the version from the `pandoc-types` bound in the tag's `pandoc.cabal` (`scripts/pandoc-api-version.sh`), so no one maintains the mapping. Every branch builds the same `pandoc-api`, and uploads skip the copies that already exist.
 

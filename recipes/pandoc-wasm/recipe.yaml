@@ -3,9 +3,14 @@
 # noarch package. Run it with any WASI runtime, e.g.
 #
 #   wasmtime run "$CONDA_PREFIX/share/pandoc-wasm/pandoc.wasm" --version
+#
+# It depends on pandoc-api like pandoc does, so that packages meant for
+# pandoc.wasm (e.g. filters loaded next to it in a browser) can require a
+# matching API.
 context:
   version: ${{ env.get("PANDOC_VERSION") }}
-  build_number: 0
+  api_version: ${{ env.get("PANDOC_API_VERSION") }}
+  build_number: 1
 
 package:
   name: pandoc-wasm
@@ -18,9 +23,15 @@ source:
 build:
   number: ${{ build_number }}
   noarch: generic
+  string: pandoc_forge_${{ build_number }}
   script:
     - mkdir -p "$PREFIX/share/pandoc-wasm"
     - cp pandoc.wasm "$PREFIX/share/pandoc-wasm/pandoc.wasm"
+
+requirements:
+  run:
+    # see recipes/pandoc-api
+    - pandoc-api ${{ api_version }}.*
 
 tests:
   - package_contents:

@@ -178,6 +178,10 @@ jobs:
             echo "::notice::pandoc $PANDOC_VERSION has no wasm build upstream; skipping pandoc-wasm"
           fi
 
+      - name: Read pandoc API version
+        if: steps.wasm.outputs.supported
+        run: echo "PANDOC_API_VERSION=$(bash scripts/pandoc-api-version.sh pandoc-src)" >> "$GITHUB_ENV"
+
       - name: Restore wasm cabal store
         if: steps.wasm.outputs.supported
         id: cache
@@ -210,6 +214,7 @@ jobs:
         with:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
           recipe-path: recipes/pandoc-wasm/recipe.yaml
+          build-args: --recipe recipes/pandoc-api/recipe.yaml
           artifact-name: conda-noarch
 
   # Pushes to main, and manual runs for the dev channel, upload whatever built.
