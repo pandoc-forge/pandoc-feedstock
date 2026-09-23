@@ -51,6 +51,9 @@ jobs:
       - name: Fetch pandoc source
         run: git clone --depth 1 --branch "$PANDOC_VERSION" https://github.com/jgm/pandoc pandoc-src
 
+      - name: Read pandoc API version
+        run: echo "PANDOC_API_VERSION=$(bash scripts/pandoc-api-version.sh pandoc-src)" >> "$GITHUB_ENV"
+
       - name: Set up GHC
         if: runner.os != 'Linux'
         id: ghc
@@ -102,11 +105,15 @@ jobs:
           path: ${{ steps.store.outputs.path }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+      # pandoc depends on pandoc-api, so every job builds the (noarch)
+      # pandoc-api too, for pandoc's tests to find it. The copies are
+      # equivalent; the upload jobs keep one.
       - name: Package
         uses: prefix-dev/rattler-build-action@v0.2.39
         with:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
           recipe-path: recipes/pandoc/recipe.yaml
+          build-args: --recipe recipes/pandoc-api/recipe.yaml
           artifact-name: conda-${{ matrix.subdir }}
 
   wasm:
