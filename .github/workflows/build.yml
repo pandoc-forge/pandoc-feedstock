@@ -54,6 +54,11 @@ jobs:
       - name: Read pandoc API version
         run: echo "PANDOC_API_VERSION=$(bash scripts/pandoc-api-version.sh pandoc-src)" >> "$GITHUB_ENV"
 
+      - name: Fetch pandoc-crossref source
+        run: |
+          git clone --depth 1 --branch "$CROSSREF_TAG" https://github.com/lierdakil/pandoc-crossref crossref-src
+          echo "CROSSREF_VERSION=$(awk '/^version:/ {print $2}' crossref-src/pandoc-crossref.cabal)" >> "$GITHUB_ENV"
+
       - name: Set up GHC
         if: runner.os != 'Linux'
         id: ghc
@@ -77,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ steps.store.outputs.path }}
-          key: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-${{ env.INDEX_STATE }}-${{ hashFiles('pandoc-src/cabal.project', 'pandoc-src/**/*.cabal') }}
+          key: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-${{ env.INDEX_STATE }}-${{ hashFiles('pandoc-src/cabal.project', 'pandoc-src/**/*.cabal', 'crossref-src/*.cabal') }}
           restore-keys: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-
 
       - name: Build pandoc (static, in Alpine container)
@@ -98,6 +103,29 @@ jobs:
         if: runner.os != 'Linux'
         run: bash scripts/build-native.sh pandoc-src dist/pandoc
 
+      # pandoc-crossref reuses the pandoc library just built. Its failure
+      # doesn't stop pandoc being packaged; upload-release then leaves it out.
+      - name: Build pandoc-crossref (static, in Alpine container)
+        if: runner.os == 'Linux'
+        id: crossref-linux
+        continue-on-error: true
+        env:
+          CABALOPTS: -f-export-dynamic --enable-executable-static -j4
+          GHCOPTS: -j4 +RTS -A256m -RTS -split-sections -optc-Os -optl=-pthread
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" -v "$HOME/cabal-home:/cabal-home" -w /work \
+            -e HOME=/cabal-home -e CABALOPTS -e GHCOPTS \
+            --user "$(id -u):$(id -g)" \
+            "$GHC_MUSL_IMAGE" \
+            bash -c 'git config --global --add safe.directory "*" && bash scripts/build-crossref.sh pandoc-src crossref-src dist/pandoc-crossref'
+
+      - name: Build pandoc-crossref
+        if: runner.os != 'Linux'
+        id: crossref
+        continue-on-error: true
+        run: bash scripts/build-crossref.sh pandoc-src crossref-src dist/pandoc-crossref
+
       - name: Save cabal store
         if: always() && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6.1.0
@@ -115,6 +143,17 @@ jobs:
           recipe-path: recipes/pandoc/recipe.yaml
           build-args: --recipe recipes/pandoc-api/recipe.yaml
           artifact-name: conda-${{ matrix.subdir }}
+
+      # Tests against the pandoc packaged above (rattler-build's output dir is
+      # a channel), so this artifact carries a copy of it too.
+      - name: Package pandoc-crossref
+        if: steps.crossref-linux.outcome == 'success' || steps.crossref.outcome == 'success'
+        continue-on-error: true
+        uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
+          recipe-path: recipes/pandoc-crossref/recipe.yaml
+          artifact-name: conda-crossref-${{ matrix.subdir }}
 
   wasm:
     name: pandoc-wasm
@@ -238,6 +277,16 @@ jobs:
           pattern: conda-*
           path: packages
           merge-multiple: true
+
+      # pandoc-crossref may fail without failing its job. Release it only if it
+      # built on every platform, like pandoc.
+      - name: Drop pandoc-crossref unless complete
+        run: |
+          n=$(find packages -name 'pandoc-crossref-*.conda' | wc -l)
+          if (( n != 5 )); then
+            echo "::warning::pandoc-crossref built on $n of 5 platforms; not releasing it"
+            find packages -name 'pandoc-crossref-*.conda' -delete
+          fi
 
       - uses: prefix-dev/rattler-build-action@v0.2.39
         with:
