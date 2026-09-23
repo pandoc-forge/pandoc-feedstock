@@ -11,6 +11,8 @@
 # comes from $INDEX_STATE (see pins.env).
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
+
 src=$(cd "$1" && pwd)
 mkdir -p "$2"
 out=$(cd "$2" && pwd)
@@ -43,18 +45,12 @@ make pandoc.wasm
 
 cp pandoc.wasm COPYING.md COPYRIGHT "$out/"
 ls -l "$out/pandoc.wasm"
-if command -v wasmtime >/dev/null; then
-	echo "Smoke test with wasmtime..."
-	wasmtime --version
-	# pandoc.wasm uses the exception-handling proposal (for Lua's setjmp/longjmp)
-	# and needs a preopened working directory. `--version` reports `-lua` for
-	# upstream's pandoc.wasm too, but Lua filters work.
-	run=(wasmtime run -W exceptions=y --dir . "$out/pandoc.wasm")
-	cd "$(mktemp -d)"
-	"${run[@]}" --version
-	echo '# Hello' | "${run[@]}" -t html | grep -q '<h1 id="hello">Hello</h1>'
-	echo 'function Str(e) return pandoc.Str(e.text:upper()) end' >upper.lua
-	echo hello | "${run[@]}" -L upper.lua -t plain | grep -q HELLO
-else
-	echo "wasmtime not found; skipping smoke test"
-fi
+# Smoke test. Node comes with the ghc-wasm-meta toolchain sourced above.
+echo "Smoke test with node $(node --version)..."
+run=(node --no-warnings "$here/run-wasm.mjs" "$out/pandoc.wasm")
+cd "$(mktemp -d)"
+"${run[@]}" --version
+echo '# Hello' | "${run[@]}" -t html | grep -q '<h1 id="hello">Hello</h1>'
+# `--version` reports -lua for upstream's pandoc.wasm too, but Lua filters work.
+echo 'function Str(e) return pandoc.Str(e.text:upper()) end' >upper.lua
+echo hello | "${run[@]}" -L upper.lua -t plain | grep -q HELLO
