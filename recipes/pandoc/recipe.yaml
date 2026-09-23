@@ -2,10 +2,12 @@
 # The version comes from PANDOC_VERSION in pins.env, which CI exports;
 # locally:
 #
-#   (set -a; . ./pins.env; rattler-build build -r recipes/pandoc)
+#   (set -a; . ./pins.env; export PANDOC_API_VERSION=$(scripts/pandoc-api-version.sh pandoc-src)
+#    rattler-build build -r recipes/pandoc-api -r recipes/pandoc)
 context:
   version: ${{ env.get("PANDOC_VERSION") }}
-  build_number: 0
+  api_version: ${{ env.get("PANDOC_API_VERSION") }}
+  build_number: 1
 
 package:
   name: pandoc
@@ -32,6 +34,12 @@ build:
         - if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
         - copy bin\pandoc.exe "%LIBRARY_BIN%\pandoc.exe"
 
+requirements:
+  run:
+    # the pandoc API (pandoc-types major.minor) this pandoc speaks; see
+    # recipes/pandoc-api
+    - pandoc-api ${{ api_version }}.*
+
 tests:
   - script:
       - pandoc --version
@@ -41,6 +49,7 @@ tests:
           - echo '# Hello' | pandoc -t html | grep -q '<h1 id="hello">Hello</h1>'
           - pandoc-lua -e 'assert(tostring(pandoc.types.Version(PANDOC_VERSION)) == "${{ version }}")'
           - pandoc-server --version
+          - echo | pandoc -t json | grep -q '"pandoc-api-version":\[${{ api_version | replace(".", ",") }},'
 
 about:
   homepage: https://pandoc.org
