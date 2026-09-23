@@ -54,3 +54,8 @@ echo '# Hello' | "${run[@]}" -t html | grep -q '<h1 id="hello">Hello</h1>'
 # `--version` reports -lua for upstream's pandoc.wasm too, but Lua filters work.
 echo 'function Str(e) return pandoc.Str(e.text:upper()) end' >upper.lua
 echo hello | "${run[@]}" -L upper.lua -t plain | grep -q HELLO
+# The API version the pandoc-wasm package will depend on (CI sets it).
+if [[ -n ${PANDOC_API_VERSION:-} ]]; then
+	echo "Checking for pandoc API $PANDOC_API_VERSION..."
+	echo | "${run[@]}" -t json | grep -q "\"pandoc-api-version\":\[${PANDOC_API_VERSION/./,},"
+fi
