@@ -11,9 +11,9 @@ on:
         description: prefix.dev channel to upload to
         type: choice
         options:
-          - pandoc-forge-dev
+          - pandoc-forge/dev
           - pandoc-forge
-        default: pandoc-forge-dev
+        default: pandoc-forge/dev
 
 permissions:
   contents: read
@@ -228,7 +228,7 @@ jobs:
       contents: read
       id-token: write # trusted publishing to prefix.dev
     env:
-      CHANNEL: ${{ vars.PREFIX_DEV_CHANNEL || 'ickc/pandoc-forge-dev' }}
+      CHANNEL: ${{ vars.PREFIX_DEV_CHANNEL || 'pandoc-forge/dev' }}
     steps:
       - uses: actions/download-artifact@v8.0.1
         with:
@@ -275,7 +275,7 @@ jobs:
       contents: read
       id-token: write # trusted publishing to prefix.dev
     env:
-      CHANNEL: ${{ vars.PREFIX_RELEASE_CHANNEL || 'ickc/pandoc-forge' }}
+      CHANNEL: ${{ vars.PREFIX_RELEASE_CHANNEL || 'pandoc-forge' }}
     steps:
       - uses: actions/download-artifact@v8.0.1
         with:

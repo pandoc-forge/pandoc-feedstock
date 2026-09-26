@@ -24,12 +24,12 @@ CI reads the version from the `pandoc-types` bound in the tag's `pandoc.cabal` (
 ## Install
 
 ```sh
-pixi add --channel https://prefix.dev/ickc/pandoc-forge --channel conda-forge pandoc
+pixi add --channel https://prefix.dev/pandoc-forge --channel conda-forge pandoc
 # or
-conda install -c https://prefix.dev/ickc/pandoc-forge -c conda-forge pandoc
+conda install -c https://prefix.dev/pandoc-forge -c conda-forge pandoc
 ```
 
-Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
+Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 `pandoc-forge` builds have build strings matching `*pandoc_forge*`. To require them over conda-forge's, use the spec `pandoc * *pandoc_forge*`.
 
@@ -48,7 +48,7 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 
 ## Publishing
 
-- Pushes to `main` upload whatever built to `pandoc-forge-dev`.
+- Pushes to `main` upload whatever built to `pandoc-forge/dev`.
 - Releases to `pandoc-forge` are manual: run the workflow from `main` or a `v*` branch with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main` and `v*`.
 
 ## Older pandoc versions
@@ -58,7 +58,7 @@ Pre-release and test builds go to `https://prefix.dev/ickc/pandoc-forge-dev`.
 ## Publishing details
 
 - Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new `build_number`.
-- The target channels default to `ickc/pandoc-forge-dev` and `ickc/pandoc-forge`. The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
+- The target channels default to `pandoc-forge/dev` and `pandoc-forge` (the `pandoc-forge` group's primary channel). The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
 
 ## Updating
 
