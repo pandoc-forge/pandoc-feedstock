@@ -57,15 +57,41 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 ## Older pandoc versions
 
-`main` builds the latest pandoc. Each older version that downstream packages pin (for example quarto's exact `pandoc 3.8.3`) lives on a `v<major>.<minor>.x` branch, which differs from `main` only in `pins.env`. Changes to the build are made on `main` and merged into the branches.
+`main` builds the latest pandoc. Each older version that downstream packages pin (for example quarto's exact `pandoc 3.8.3`) lives on a `v<major>.<minor>.x` branch, which differs from `main` only in `pins.env` (including its build numbers). Changes to the build are made on `main` and merged into the branches.
 
 ## Publishing details
 
-- Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new `build_number`.
+- Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new build number (`*_BUILD_NUMBER` in `pins.env`).
 - The target channels default to `pandoc-forge/dev` and `pandoc-forge` (the `pandoc-forge` group's primary channel). The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
 
 ## Updating
 
-- **New pandoc release:** update `pins.env` (version, index-state, and toolchain if upstream changed it), and reset `build_number` to 0 in the `pandoc` and `pandoc-wasm` recipes.
-- **Packaging change for the same pandoc version:** bump `build_number` instead.
-- **New pandoc-crossref release:** on each branch whose pandoc the new tag's `pandoc` bounds admit, set `CROSSREF_TAG` in `pins.env` and reset `build_number` in `recipes/pandoc-crossref` to 0. Its pandoc packages already exist and are skipped on upload.
+### Bumping to a new pandoc release
+
+What changed upstream decides the work, so this list is a starting point, not a complete procedure. Start from the release notes and the diff since the previous tag: <https://github.com/jgm/pandoc/releases/latest>, and `git diff <old>..<new> -- pandoc.cabal cabal.project flake.lock Makefile .circleci .github/workflows wasm` in a jgm/pandoc clone.
+
+1. **Keep the previous version buildable.** If a downstream package pins it exactly (e.g. quarto on conda-forge), or it is the newest pandoc with an unpatched pandoc-crossref, branch `v<old>.x` from `main` first.
+2. **`pins.env` on `main`:**
+   - `PANDOC_VERSION`: the new tag.
+   - `INDEX_STATE`: the GitHub release's `publishedAt` (`gh release view <tag> -R jgm/pandoc --json publishedAt`).
+   - `GHC_VERSION`, `CABAL_VERSION`: what upstream's release builds use (`.circleci/config.yml`, `.github/workflows/release-candidate.yml`).
+   - `GHC_MUSL_IMAGE`: the current digest of `quay.io/benz0li/ghc-musl:<ghc major.minor>`. Always re-check it. The image is rebuilt from time to time, and quay deletes the old digest, so an old pin can just stop working.
+   - `CROSSREF_TAG`: the newest tag whose `pandoc` bounds admit the new version. If none does yet, keep the newest tag and add `patches/pandoc-crossref/<tag>/*.patch` relaxing its bounds (`pandoc-crossref.cabal` and `package.yaml`). crossref's test suites decide whether it ships.
+   - Reset `PANDOC_BUILD_NUMBER`, `PANDOC_WASM_BUILD_NUMBER` and `CROSSREF_BUILD_NUMBER` to 0.
+3. **Things in the upstream diff to look at:**
+   - the `pandoc-types` bound in `pandoc.cabal`: a new major.minor means a new `pandoc-api` version, and filters need rebuilding against it;
+   - cabal flags (`embed_data_files`, `http`, `lua`, `server`) and their defaults: `scripts/cabal-opts.sh` sets them explicitly;
+   - `cabal.project`, especially the `wasm32` section and its `source-repository-package` forks;
+   - `flake.lock`: its ghc-wasm-meta revision is the wasm toolchain;
+   - build tools needed at configure time (`alex`, `happy`), installed by the wasm job;
+   - new Lua API marked `Since: <new version>` in `doc/lua-filters.md`, for filters' minimum versions.
+4. **Try it locally** where it's cheap: the Linux build in the ghc-musl container (`build-native.sh`, then `build-crossref.sh`) shows most problems in about 20 minutes.
+5. **Open a PR.** PR runs build and test everything on every platform without uploading. Check crossref's steps in the logs as well: they are `continue-on-error`, so a green job doesn't mean crossref built.
+6. **Merge**, which uploads to `pandoc-forge/dev`. Check it from there: `pandoc --version`, `pandoc` + `pandoc-crossref` (no version warning), a Lua filter such as `pandoc-amsthm`, and that `quarto` still resolves to the pandoc it pins.
+7. **Release:** Actions → Build → Run workflow on `main` → `channel: pandoc-forge`.
+
+### Other updates
+
+- **Packaging change for an already-published version:** on that version's branch, bump the affected `*_BUILD_NUMBER` in `pins.env`.
+- **New pandoc-crossref release:** on each branch whose pandoc the new tag's `pandoc` bounds admit, set `CROSSREF_TAG`, delete `patches/pandoc-crossref/<old tag>/`, and reset `CROSSREF_BUILD_NUMBER` to 0. Its pandoc packages already exist and are skipped on upload.
+- **Build changes** go on `main` and are then merged into each `v*` branch. `pins.env` is the only file that differs, so a merge conflict can only be there: keep the branch's values.

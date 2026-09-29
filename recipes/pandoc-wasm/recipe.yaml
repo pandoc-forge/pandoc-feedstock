@@ -10,7 +10,7 @@
 context:
   version: ${{ env.get("PANDOC_VERSION") }}
   api_version: ${{ env.get("PANDOC_API_VERSION") }}
-  build_number: 0
+  build_number: ${{ env.get("PANDOC_WASM_BUILD_NUMBER") }}
 
 package:
   name: pandoc-wasm

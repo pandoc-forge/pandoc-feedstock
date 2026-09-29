@@ -11,7 +11,7 @@
 context:
   version: ${{ env.get("CROSSREF_VERSION") }}
   pandoc_version: ${{ env.get("PANDOC_VERSION") }}
-  build_number: 0
+  build_number: ${{ env.get("CROSSREF_BUILD_NUMBER") }}
 
 package:
   name: pandoc-crossref
