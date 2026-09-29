@@ -7,7 +7,7 @@
 context:
   version: ${{ env.get("PANDOC_VERSION") }}
   api_version: ${{ env.get("PANDOC_API_VERSION") }}
-  build_number: 1
+  build_number: 0
 
 package:
   name: pandoc

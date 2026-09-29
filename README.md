@@ -6,12 +6,16 @@ Builds [pandoc](https://pandoc.org) from source for the `pandoc-forge` conda cha
 |---|---|---|
 | `pandoc` | linux-64, linux-aarch64, osx-64, osx-arm64, win-64 | `pandoc` (plus `pandoc-lua` and `pandoc-server` symlinks on Unix) and its man pages. Statically linked on Linux, with data files embedded and `+lua +server +http` |
 | `pandoc-wasm` | noarch | `share/pandoc-wasm/pandoc.wasm`, a WASI module |
-| `pandoc-crossref` | same as `pandoc` | `pandoc-crossref`, statically linked against the same pandoc library as the `pandoc` binary, and pinned to that exact pandoc (`pandoc ==3.11 *pandoc_forge*`). Build strings name the pandoc version, e.g. `pandoc3_11_pandoc_forge_0` |
+| `pandoc-crossref` | same as `pandoc` | `pandoc-crossref`, statically linked against the same pandoc library as the `pandoc` binary, and pinned to that exact pandoc (`pandoc ==3.12 *pandoc_forge*`). Build strings name the pandoc version, e.g. `pandoc3_12_pandoc_forge_0` |
 | `pandoc-api` | noarch | Nothing. Its version is the pandoc API version (pandoc-types major.minor, e.g. `1.23`) |
 
 ## pandoc-crossref
 
 pandoc-crossref is built right after pandoc in the same job, by `scripts/build-crossref.sh`. It freezes pandoc's cabal plan, adds pandoc-crossref (the `CROSSREF_TAG` in `pins.env`) to pandoc's own cabal project, and builds it with the same options. So it links exactly the pandoc library that is in the `pandoc` binary, and only pandoc-crossref and its few extra dependencies get compiled. That means using pandoc's GHC and Hackage snapshot rather than upstream pandoc-crossref's GHC and freeze file.
+
+pandoc-crossref's own test suites (`test-pandoc-crossref` and `test-integrative`, with the flaky tests enabled as in upstream's CI) run in the same job against that pandoc library, and a failure fails the build.
+
+When no pandoc-crossref tag admits a new pandoc yet, `CROSSREF_TAG` stays at the newest tag, and CI applies our patches in `patches/pandoc-crossref/<tag>/`, which relax its `pandoc` bounds. Such a build is released only if crossref's test suites all pass against the new pandoc. Once upstream tags a release that admits the new pandoc, switch `CROSSREF_TAG` to it and drop the patches.
 
 pandoc-crossref warns whenever it runs through a pandoc other than the one it was compiled with, and its test checks that there is no such warning. A pandoc-crossref failure doesn't stop pandoc being packaged. Releases include pandoc-crossref only if it built on all five platforms.
 
