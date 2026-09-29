@@ -12,6 +12,12 @@
 # pandoc-crossref and its few extra dependencies get compiled. Takes the same
 # $CABALOPTS and $GHCOPTS as build-native.sh; they must match for the pandoc
 # library to be reused.
+#
+# pandoc-crossref's own test suites then run against that pandoc library, with
+# the flaky tests enabled as in upstream's CI, and must all pass: a failure
+# fails the build, so the package is neither built nor released. This matters
+# most when CROSSREF_TAG is patched to admit a newer pandoc than upstream does
+# (patches/pandoc-crossref/<tag>/, applied by CI).
 set -euo pipefail
 
 src=$(cd "$1" && pwd)
@@ -32,9 +38,17 @@ xpath=$xsrc
 if command -v cygpath >/dev/null; then
 	xpath=$(cygpath -m "$xsrc")
 fi
-echo "packages: $xpath" >>cabal.project.local
+cat >>cabal.project.local <<EOF
+packages: $xpath
+
+package pandoc-crossref
+  tests: True
+  flags: +enable_flaky_tests
+EOF
 # shellcheck disable=SC2086
 cabal build $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-crossref
+# shellcheck disable=SC2086
+cabal test $CABALOPTS --ghc-options="$GHCOPTS" --test-show-details=direct pandoc-crossref
 # shellcheck disable=SC2086
 binpath=$(cabal list-bin $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-crossref)
 echo "Built executable: $binpath"

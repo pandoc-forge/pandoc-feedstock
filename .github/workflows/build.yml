@@ -57,6 +57,12 @@ jobs:
       - name: Fetch pandoc-crossref source
         run: |
           git clone --depth 1 --branch "$CROSSREF_TAG" https://github.com/lierdakil/pandoc-crossref crossref-src
+          # Our patches for this tag, e.g. to admit a newer pandoc than its bounds do
+          for p in patches/pandoc-crossref/"$CROSSREF_TAG"/*.patch; do
+            [[ -e $p ]] || continue
+            echo "Applying $p"
+            git -C crossref-src apply --verbose "$PWD/$p"
+          done
           echo "CROSSREF_VERSION=$(awk '/^version:/ {print $2}' crossref-src/pandoc-crossref.cabal)" >> "$GITHUB_ENV"
 
       - name: Set up GHC
