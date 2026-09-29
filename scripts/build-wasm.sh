@@ -51,6 +51,8 @@ run=(node --no-warnings "$here/run-wasm.mjs" "$out/pandoc.wasm")
 cd "$(mktemp -d)"
 "${run[@]}" --version
 echo '# Hello' | "${run[@]}" -t html | grep -q '<h1 id="hello">Hello</h1>'
+# Standalone output needs the templates, which must be embedded.
+echo hello | "${run[@]}" -s --metadata title=t -t html | grep -q '<title>t</title>'
 # `--version` reports -lua for upstream's pandoc.wasm too, but Lua filters work.
 echo 'function Str(e) return pandoc.Str(e.text:upper()) end' >upper.lua
 echo hello | "${run[@]}" -L upper.lua -t plain | grep -q HELLO
