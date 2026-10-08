@@ -55,6 +55,7 @@ cabal build $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-cross
 testopts=()
 if [[ -f $skips ]]; then
 	while IFS= read -r path; do
+		path=${path%$'\r'} # Git for Windows may check the file out with CRLF
 		[[ -z $path || $path == '#'* ]] && continue
 		echo "Skipping known failure: $path"
 		testopts+=(--test-option=--skip "--test-option=$path")
