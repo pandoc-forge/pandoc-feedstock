@@ -5,7 +5,8 @@ name: Bump
 # pandoc-crossref tag. The PRs are opened with the pandoc-forge-bot GitHub
 # App's token rather than GITHUB_TOKEN, because events from GITHUB_TOKEN
 # don't trigger workflows, and build.yml must run on them. Inert until the
-# App is set up (README: Automation).
+# App is set up (README: Automation). PRs that change the bot get a dry run,
+# which also checks the App's credentials.
 on:
   schedule:
     - cron: '23 5 * * *'
@@ -15,6 +16,8 @@ on:
         description: Print the proposed changes instead of opening PRs
         type: boolean
         default: false
+  pull_request:
+    paths: [.github/workflows/bump.yml, scripts/bot.py]
 
 permissions:
   contents: read
@@ -24,7 +27,10 @@ concurrency:
 
 jobs:
   bump:
-    if: vars.BOT_CLIENT_ID != ''
+    # Fork PRs get no secrets
+    if: >-
+      vars.BOT_CLIENT_ID != '' && (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/create-github-app-token@v3.2.0
@@ -53,4 +59,4 @@ jobs:
       - name: Propose updates
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-        run: python3 scripts/bot.py ${{ inputs.dry-run && '--dry-run' || '' }}
+        run: python3 scripts/bot.py ${{ (inputs.dry-run || github.event_name == 'pull_request') && '--dry-run' || '' }}

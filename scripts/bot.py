@@ -8,9 +8,11 @@ changed, pushes it as bot/<...> and opens a PR against that branch:
             the ghc-musl image and GHC upstream builds with, CROSSREF_TAG (or a
             bounds patch), build numbers reset; the PR body lists what in
             upstream's diff needs a human look.
-  image     the pinned ghc-musl digest no longer exists on quay (benz0li
-            rebuilds tags, and quay deletes the old manifest): repin to the
-            current digest of the tag GHC_VERSION, i.e. the same GHC.
+  image     (main only) the pinned ghc-musl digest no longer exists on quay
+            (benz0li rebuilds tags, and quay stops serving the old manifest):
+            repin to the current digest of the tag GHC_VERSION, i.e. the same
+            GHC. Maintenance branches are repinned by hand when one needs a
+            rebuild, rather than each costing a full CI run.
   crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
             it, drop our patches for the old tag.
 
@@ -233,6 +235,8 @@ def switch_crossref(old, new, version):
 # --- checks --------------------------------------------------------------
 
 def check_image(branch):
+    if branch != "main":
+        return None
     pins = read_pins()
     if digest_exists(pins["GHC_MUSL_IMAGE"]):
         return None
