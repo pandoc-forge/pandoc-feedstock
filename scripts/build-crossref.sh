@@ -61,8 +61,10 @@ if [[ -f $skips ]]; then
 		testopts+=(--test-option=--skip "--test-option=$path")
 	done <"$skips"
 fi
+# Git Bash would rewrite the "/Integrative tests/..." arguments as Windows
+# paths, which then match no test.
 # shellcheck disable=SC2086
-cabal test $CABALOPTS --ghc-options="$GHCOPTS" --test-show-details=direct ${testopts[@]+"${testopts[@]}"} pandoc-crossref
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' cabal test $CABALOPTS --ghc-options="$GHCOPTS" --test-show-details=direct ${testopts[@]+"${testopts[@]}"} pandoc-crossref
 # shellcheck disable=SC2086
 binpath=$(cabal list-bin $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-crossref)
 echo "Built executable: $binpath"
