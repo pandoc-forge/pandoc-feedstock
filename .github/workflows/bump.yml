@@ -1,0 +1,56 @@
+name: Bump
+
+# Daily, propose pins.env updates as PRs (scripts/bot.py): a new pandoc
+# release on main, a ghc-musl digest that quay deleted, a newer
+# pandoc-crossref tag. The PRs are opened with the pandoc-forge-bot GitHub
+# App's token rather than GITHUB_TOKEN, because events from GITHUB_TOKEN
+# don't trigger workflows, and build.yml must run on them. Inert until the
+# App is set up (README: Automation).
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Print the proposed changes instead of opening PRs
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  bump:
+    if: vars.BOT_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/create-github-app-token@v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write # labels
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Commit as the App's bot user
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)
+          git config user.name "$SLUG[bot]"
+          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+
+      - name: Propose updates
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 scripts/bot.py ${{ inputs.dry-run && '--dry-run' || '' }}
