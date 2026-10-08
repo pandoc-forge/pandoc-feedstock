@@ -101,7 +101,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 `.github/workflows/bump.yml` runs `scripts/bot.py` daily, and it opens a PR for each of the updates above that is mechanical:
 
 - **A new pandoc release** (on `main`): `PANDOC_VERSION`, `INDEX_STATE`, GHC and the image from upstream's CircleCI config, `CROSSREF_TAG` or a generated bounds patch, and build numbers reset. The PR body lists what in upstream's diff needs a look: GHC, the pandoc API, flags and `cabal.project`, the wasm toolchain, and new Lua API. It's labelled `needs-review`, `pandoc-api` or `crossref-patched` when that applies. Steps 1 and 5–7 of the checklist stay manual.
-- **A pinned ghc-musl digest that quay deleted** (any branch): repinned to the current digest of the same GHC's tag.
+- **A pinned ghc-musl digest that quay no longer serves** (on `main`): repinned to the current digest of the same GHC's tag. A maintenance branch is repinned by hand when it needs a rebuild.
 - **A newer pandoc-crossref tag** admitting a branch's pandoc.
 
 A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]`.
