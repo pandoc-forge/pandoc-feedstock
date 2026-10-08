@@ -17,8 +17,13 @@
 # the flaky tests enabled as in upstream's CI, and must all pass: a failure
 # fails the build, so the package is neither built nor released. This matters
 # most when CROSSREF_TAG is patched to admit a newer pandoc than upstream does
-# (patches/pandoc-crossref/<tag>/, applied by CI).
+# (patches/pandoc-crossref/<tag>/, applied by CI). Tests known to fail against
+# this pandoc only because pandoc's output changed are listed, with the
+# reason, in patches/pandoc-crossref/$CROSSREF_TAG/skip-pandoc-$PANDOC_VERSION.txt
+# and skipped.
 set -euo pipefail
+
+skips=$(cd "$(dirname "$0")/.." && pwd)/patches/pandoc-crossref/${CROSSREF_TAG:?}/skip-pandoc-${PANDOC_VERSION:?}.txt
 
 src=$(cd "$1" && pwd)
 xsrc=$(cd "$2" && pwd)
@@ -47,8 +52,16 @@ package pandoc-crossref
 EOF
 # shellcheck disable=SC2086
 cabal build $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-crossref
+testopts=()
+if [[ -f $skips ]]; then
+	while IFS= read -r path; do
+		[[ -z $path || $path == '#'* ]] && continue
+		echo "Skipping known failure: $path"
+		testopts+=(--test-option=--skip "--test-option=$path")
+	done <"$skips"
+fi
 # shellcheck disable=SC2086
-cabal test $CABALOPTS --ghc-options="$GHCOPTS" --test-show-details=direct pandoc-crossref
+cabal test $CABALOPTS --ghc-options="$GHCOPTS" --test-show-details=direct ${testopts[@]+"${testopts[@]}"} pandoc-crossref
 # shellcheck disable=SC2086
 binpath=$(cabal list-bin $CABALOPTS --ghc-options="$GHCOPTS" pandoc-crossref:exe:pandoc-crossref)
 echo "Built executable: $binpath"
