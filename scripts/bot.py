@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """Propose pins.env updates as pull requests (run daily by bump.yml).
 
-Three checks, each of which edits the checked-out branch and, if anything
+Two checks, each of which edits the checked-out branch and, if anything
 changed, pushes it as bot/<...> and opens a PR against that branch:
 
   pandoc    (main only) a new jgm/pandoc release: PANDOC_VERSION, INDEX_STATE,
             the ghc-musl image and GHC upstream builds with, CROSSREF_TAG (or a
             bounds patch), build numbers reset; the PR body lists what in
             upstream's diff needs a human look.
-  image     (main only) the pinned ghc-musl digest no longer exists on quay
-            (benz0li rebuilds tags, and quay stops serving the old manifest):
-            repin to the current digest of the tag GHC_VERSION, i.e. the same
-            GHC. Maintenance branches are repinned by hand when one needs a
-            rebuild, rather than each costing a full CI run.
   crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
             it, drop our patches for the old tag.
 
@@ -38,10 +33,6 @@ IMAGE_REPO = "benz0li/ghc-musl"
 PINS = Path("pins.env")
 # The only paths the bot changes, stages or resets
 OWNED = ["pins.env", "patches"]
-MANIFEST_TYPES = ", ".join([
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-])
 # Files of an upstream release whose changes can need work here
 # (README: Bumping to a new pandoc release).
 WATCH = ["pandoc.cabal", "cabal.project", "flake.lock", "Makefile",
@@ -94,14 +85,6 @@ def set_pin(key, value, comment=None, marker=None):
 
 # --- ghc-musl on quay ----------------------------------------------------
 
-def digest_exists(image):
-    repo, digest = image.split("@")
-    path = repo.removeprefix("quay.io/")
-    status, _ = http(f"https://quay.io/v2/{path}/manifests/{digest}",
-                     {"Accept": MANIFEST_TYPES}, "HEAD")
-    return status == 200
-
-
 def tag_digest(tag):
     _, body = http(f"https://quay.io/api/v1/repository/{IMAGE_REPO}/tag/"
                    f"?specificTag={tag}&onlyActiveTags=true")
@@ -110,13 +93,11 @@ def tag_digest(tag):
 
 
 def set_image(ghc):
-    """Pin the current digest of the ghc-musl tag for exactly GHC `ghc`."""
-    digest = tag_digest(ghc)
-    if not digest:
+    """Use the ghc-musl tag for exactly GHC `ghc` (a tag, not a digest:
+    see pins.env)."""
+    if not tag_digest(ghc):
         raise SystemExit(f"no ghc-musl tag {ghc} on quay")
-    set_pin("GHC_MUSL_IMAGE", f"quay.io/{IMAGE_REPO}@{digest}",
-            f"quay.io/{IMAGE_REPO}:{ghc}, pinned by digest (GHC {ghc})",
-            marker="quay.io/")
+    set_pin("GHC_MUSL_IMAGE", f"quay.io/{IMAGE_REPO}:{ghc}")
 
 
 # --- pandoc-crossref -----------------------------------------------------
@@ -233,26 +214,6 @@ def switch_crossref(old, new, version):
 
 
 # --- checks --------------------------------------------------------------
-
-def check_image(branch):
-    if branch != "main":
-        return None
-    pins = read_pins()
-    if digest_exists(pins["GHC_MUSL_IMAGE"]):
-        return None
-    set_image(pins["GHC_VERSION"])
-    digest = read_pins()["GHC_MUSL_IMAGE"].split("@")[1]
-    return dict(
-        branch=f"bot/ghc-musl-{branch}-{digest[7:19]}",
-        title=f"{branch}: repin ghc-musl (GHC {pins['GHC_VERSION']})",
-        body=f"The pinned digest `{pins['GHC_MUSL_IMAGE'].split('@')[1]}` no "
-             f"longer exists on quay: benz0li rebuilt the tag and quay deleted "
-             f"the old manifest, so this branch's Linux jobs can't start.\n\n"
-             f"`{digest}` is the current `ghc-musl:{pins['GHC_VERSION']}`, so "
-             "the GHC is unchanged. Published packages are not rebuilt "
-             "(uploads skip existing files); this keeps the branch buildable.",
-        labels=["ghc-musl"])
-
 
 def check_crossref(branch):
     pins = read_pins()
@@ -443,7 +404,7 @@ def main():
         run("git", "branch", "-r", "--format=%(refname:short)",
             "--list", "origin/v*").split()]
     for branch in branches:
-        for check in (check_pandoc, check_image, check_crossref):
+        for check in (check_pandoc, check_crossref):
             run("git", "switch", "-q", "--detach", f"origin/{branch}")
             pr = check(branch)
             if pr:
@@ -451,7 +412,7 @@ def main():
             run("git", "reset", "-q", "--hard")
             run("git", "clean", "-qfd", "--", "patches")
             if pr and check is check_pandoc:
-                break  # a release PR covers main's image and crossref too
+                break  # a release PR covers main's crossref too
 
 
 if __name__ == "__main__":

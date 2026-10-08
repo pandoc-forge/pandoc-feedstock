@@ -91,6 +91,16 @@ jobs:
           key: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-${{ env.INDEX_STATE }}-${{ hashFiles('pandoc-src/cabal.project', 'pandoc-src/**/*.cabal', 'crossref-src/*.cabal') }}
           restore-keys: cabal-${{ matrix.subdir }}-ghc${{ env.GHC_VERSION }}-
 
+      # GHC_MUSL_IMAGE is a tag, which benz0li rebuilds from time to time:
+      # record which build of it this job used.
+      - name: Pull build image
+        if: runner.os == 'Linux'
+        run: |
+          docker pull "$GHC_MUSL_IMAGE"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$GHC_MUSL_IMAGE")
+          echo "Build image: $digest"
+          echo "Build image (${{ matrix.subdir }}): \`$digest\`" >>"$GITHUB_STEP_SUMMARY"
+
       - name: Build pandoc (static, in Alpine container)
         if: runner.os == 'Linux'
         env:
