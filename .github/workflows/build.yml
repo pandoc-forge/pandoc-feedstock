@@ -121,7 +121,7 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/work" -v "$HOME/cabal-home:/cabal-home" -w /work \
-            -e HOME=/cabal-home -e CABALOPTS -e GHCOPTS \
+            -e HOME=/cabal-home -e CABALOPTS -e GHCOPTS -e PANDOC_VERSION -e CROSSREF_TAG \
             --user "$(id -u):$(id -g)" \
             "$GHC_MUSL_IMAGE" \
             bash -c 'git config --global --add safe.directory "*" && bash scripts/build-crossref.sh pandoc-src crossref-src dist/pandoc-crossref'
@@ -153,6 +153,7 @@ jobs:
       # Tests against the pandoc packaged above (rattler-build's output dir is
       # a channel), so this artifact carries a copy of it too.
       - name: Package pandoc-crossref
+        id: crossref-package
         if: steps.crossref-linux.outcome == 'success' || steps.crossref.outcome == 'success'
         continue-on-error: true
         uses: prefix-dev/rattler-build-action@v0.2.39
@@ -160,6 +161,15 @@ jobs:
           rattler-build-version: ${{ env.RATTLER_BUILD_VERSION }}
           recipe-path: recipes/pandoc-crossref/recipe.yaml
           artifact-name: conda-crossref-${{ matrix.subdir }}
+
+      # The crossref steps above may fail without failing the job, so that
+      # pandoc still uploads. On a PR, fail here instead, so that a green PR
+      # means crossref built, passed its tests and packaged.
+      - name: Check that pandoc-crossref was packaged
+        if: github.event_name == 'pull_request' && steps.crossref-package.outcome != 'success'
+        run: |
+          echo "::error::pandoc-crossref did not build, pass its tests or package; see the crossref steps above"
+          exit 1
 
   wasm:
     name: pandoc-wasm

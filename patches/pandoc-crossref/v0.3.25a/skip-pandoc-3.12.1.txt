@@ -1,0 +1,44 @@
+# Tests of pandoc-crossref v0.3.25a that fail against pandoc 3.12.1 because
+# pandoc's output changed, not because of a crossref bug: one hspec path per
+# line, passed to both test suites as --skip (scripts/build-crossref.sh).
+# Every failure on all five platforms (2026-10-08) was one of these two:
+#
+# 1. pandoc 3.12.1's Markdown reader trims whitespace inside display math
+#    ($$ this $$ is now DisplayMath "this", was " this "; jgm/pandoc
+#    c248f880e, #11887, not in the changelog). The expected and actual
+#    output differ only in whitespace.
+# 2. pandoc 3.12.1's LaTeX writer lets a figure's alt text wrap (#11924), and
+#    these tests compare output line by line.
+
+# 1. display math whitespace
+/Integrative tests/delim/LaTeX/
+/Integrative tests/delim/Markdown/
+/Integrative tests/equationNumberLaTeX/LaTeX/
+/Integrative tests/equationNumberLaTeX/Markdown/
+/Integrative tests/equations-auto/LaTeX/
+/Integrative tests/equations-auto/Markdown/
+/Integrative tests/equations-tables-auto/LaTeX/
+/Integrative tests/equations-tables-auto/Markdown/
+/Integrative tests/equations-tables/LaTeX/
+/Integrative tests/equations-tables/Markdown/
+/Integrative tests/equations/LaTeX/
+/Integrative tests/equations/Markdown/
+/Integrative tests/links-names/LaTeX/
+/Integrative tests/links-names/Markdown/
+/Integrative tests/links/LaTeX/
+/Integrative tests/links/Markdown/
+/Test files/demo.md matches demo.native/
+/Test files/demo.md with chapters matches demo-chapters.native/
+
+# 2. alt text wraps
+/Integrative tests/altAttribute/LaTeX/
+/Integrative tests/label-precedence/LaTeX/
+/Integrative tests/listOfHidden/LaTeX/
+/Integrative tests/listOfOrdering/LaTeX/
+/Integrative tests/numberOverride/LaTeX/
+/Integrative tests/preserveAltText/LaTeX/
+/Integrative tests/refsInListOf/LaTeX/
+/Integrative tests/refsInObjects/LaTeX/
+/Integrative tests/secLabels/LaTeX/
+/Integrative tests/subfigures-one-row/LaTeX/
+/Integrative tests/titlesInRefs/LaTeX/

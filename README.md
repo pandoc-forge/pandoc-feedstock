@@ -15,7 +15,7 @@ pandoc-crossref is built right after pandoc in the same job, by `scripts/build-c
 
 pandoc-crossref's own test suites (`test-pandoc-crossref` and `test-integrative`, with the flaky tests enabled as in upstream's CI) run in the same job against that pandoc library, and a failure fails the build.
 
-When no pandoc-crossref tag admits a new pandoc yet, `CROSSREF_TAG` stays at the newest tag, and CI applies our patches in `patches/pandoc-crossref/<tag>/`, which relax its `pandoc` bounds. Such a build is released only if crossref's test suites all pass against the new pandoc. Once upstream tags a release that admits the new pandoc, switch `CROSSREF_TAG` to it and drop the patches.
+When no pandoc-crossref tag admits a new pandoc yet, `CROSSREF_TAG` stays at the newest tag, and CI applies our patches in `patches/pandoc-crossref/<tag>/`, which relax its `pandoc` bounds. Such a build is released only if crossref's test suites all pass against the new pandoc. If a test fails only because pandoc's output changed (not because of a crossref bug), list it in `patches/pandoc-crossref/<tag>/skip-pandoc-<pandoc version>.txt` with the reason, and it is skipped for that pandoc only. Once upstream tags a release that admits the new pandoc, switch `CROSSREF_TAG` to it and drop the patches.
 
 pandoc-crossref warns whenever it runs through a pandoc other than the one it was compiled with, and its test checks that there is no such warning. A pandoc-crossref failure doesn't stop pandoc being packaged. Releases include pandoc-crossref only if it built on all five platforms.
 
@@ -86,7 +86,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
    - build tools needed at configure time (`alex`, `happy`), installed by the wasm job;
    - new Lua API marked `Since: <new version>` in `doc/lua-filters.md`, for filters' minimum versions.
 4. **Try it locally** where it's cheap: the Linux build in the ghc-musl container (`build-native.sh`, then `build-crossref.sh`) shows most problems in about 20 minutes.
-5. **Open a PR.** PR runs build and test everything on every platform without uploading. Check crossref's steps in the logs as well: they are `continue-on-error`, so a green job doesn't mean crossref built.
+5. **Open a PR.** PR runs build and test everything on every platform without uploading. On a PR, a job fails if pandoc-crossref didn't build, pass its tests and package (on pushes it doesn't, so that pandoc still uploads).
 6. **Merge**, which uploads to `pandoc-forge/dev`. Check it from there: `pandoc --version`, `pandoc` + `pandoc-crossref` (no version warning), a Lua filter such as `pandoc-amsthm`, and that `quarto` still resolves to the pandoc it pins.
 7. **Release:** Actions → Build → Run workflow on `main` → `channel: pandoc-forge`.
 
