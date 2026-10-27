@@ -6,13 +6,17 @@ changed, pushes it as bot/<...> and opens a PR against that branch:
 
   pandoc    (main only) a new jgm/pandoc release: PANDOC_VERSION, INDEX_STATE,
             the ghc-musl image and GHC upstream builds with, CROSSREF_TAG (or a
-            bounds patch), build numbers reset; the PR body lists what in
-            upstream's diff needs a human look.
+            bounds patch, and the old version's crossref skip list if the tag
+            stays), build numbers reset; the PR body lists what in upstream's
+            diff needs a human look.
   crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
             it, drop our patches for the old tag.
 
 A bot branch that already exists on the remote is never touched again, so a
-closed PR stays closed. Merging and releasing stay manual.
+closed PR stays closed. Merging and releasing stay manual. It checks out
+each branch in turn and resets it, so it refuses to run on a dirty tree
+(commit a change to the bot before a local dry run), and returns to the
+branch it started on.
 
 Usage: bot.py [--dry-run] [BRANCH...]   (default: main and every origin/v*)
 """
@@ -195,6 +199,27 @@ def pick_crossref(version, current):
                      "whether it ships.")
 
 
+def carry_skips(tag, old, new):
+    """Copy the tag's skip list for pandoc `old` to `new`: what pandoc's
+    output changed in `old` it most likely still changes. Return a note for
+    the PR body, or None if there is no list."""
+    d = Path(f"patches/pandoc-crossref/{tag}")
+    src = d / f"skip-pandoc-{old}.txt"
+    if not src.exists():
+        return None
+    dst = d / f"skip-pandoc-{new}.txt"
+    dst.write_text(
+        f"# Carried over by scripts/bot.py from {src.name}: the reasons below\n"
+        f"# were recorded for pandoc {old}. Delete a line once that test\n"
+        f"# passes against {new}.\n#\n" + src.read_text())
+    n = sum(1 for l in src.read_text().splitlines()
+            if l.strip() and not l.startswith("#"))
+    return (f"`{src.name}` ({n} tests) is copied to `{dst.name}`, so crossref "
+            f"skips the tests that fail only because pandoc {old}'s output "
+            f"changed. New failures still fail the PR; a skipped test that "
+            f"{new} fixed stays skipped until it is deleted from the list.")
+
+
 def crossref_comment(tag, version):
     """The pins.env comment on CROSSREF_TAG: only a patched tag has one."""
     bound = crossref_bound(tag)
@@ -343,6 +368,9 @@ def check_pandoc(branch):
         switch_crossref(pins["CROSSREF_TAG"], tag, new)
     else:
         set_crossref(tag, new)
+        skips = carry_skips(tag, old, new)
+        if skips:
+            note += " " + skips
     if "patches" in note:
         labels.append("crossref-patched")
 
@@ -357,8 +385,9 @@ def check_pandoc(branch):
             f"{' '.join(WATCH)}</summary>\n\n```\n{stat}\n```\n</details>",
             f"**Before merging:** if a downstream package pins {old} exactly, "
             f"or {old} is the newest pandoc with an unpatched crossref, branch "
-            f"`v{'.'.join(old.split('.')[:2])}.x` from `main` first. Check "
-            "crossref's steps in the logs (they are `continue-on-error`). "
+            f"`v{'.'.join(old.split('.')[:2])}.x` from `main` first. The PR fails "
+            "if pandoc-crossref didn't build, pass its tests or package; skip "
+            "a failing test only if pandoc's output changed. "
             "**After merging:** check from `pandoc-forge/dev`, then release "
             "(README: Bumping to a new pandoc release)."]
     return dict(branch=f"bot/pandoc-{new}", title=f"pandoc {new}",
@@ -398,6 +427,19 @@ def main():
                     help="print the changes instead of pushing and opening PRs")
     ap.add_argument("branches", nargs="*")
     a = ap.parse_args()
+    if run("git", "status", "--porcelain"):
+        raise SystemExit("bot.py: the working tree has changes, which it "
+                         "would reset; commit or stash them first")
+    branch = run("git", "branch", "--show-current")
+    start = ["git", "switch", "-q"] + (
+        [branch] if branch else ["--detach", run("git", "rev-parse", "HEAD")])
+    try:
+        propose_all(a)
+    finally:
+        run(*start)
+
+
+def propose_all(a):
     run("git", "fetch", "-q", "origin")
     branches = a.branches or ["main"] + [
         b.removeprefix("origin/") for b in
