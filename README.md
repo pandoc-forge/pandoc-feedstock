@@ -103,7 +103,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 - **A new pandoc release** (on `main`): `PANDOC_VERSION`, `INDEX_STATE`, GHC and the image from upstream's CircleCI config, `CROSSREF_TAG` or a generated bounds patch, and build numbers reset. The PR body lists what in upstream's diff needs a look: GHC, the pandoc API, flags and `cabal.project`, the wasm toolchain, and new Lua API. It's labelled `needs-review`, `pandoc-api` or `crossref-patched` when that applies. Steps 1 and 5–7 of the checklist stay manual.
 - **A newer pandoc-crossref tag** admitting a branch's pandoc.
 
-A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]`.
+A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]` on a clean tree (it checks out each branch, resets it, and returns to where it started).
 
 It opens PRs as the **pandoc-forge-bot** GitHub App, because PRs opened with `GITHUB_TOKEN` don't trigger `build.yml`. To set it up (once, as an org owner):
 
