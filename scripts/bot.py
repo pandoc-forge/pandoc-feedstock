@@ -403,7 +403,11 @@ def propose(base, pr, dry_run):
     if run("git", "ls-remote", "--heads", "origin", pr["branch"]):
         print("   already proposed; skipping")
         return
-    run("git", "add", "-A", "--", *OWNED)
+    # An owned path can be gone from both the tree and the index, e.g.
+    # patches/ once switch_crossref removes the old tag's only directory,
+    # and git add fails on a pathspec that matches nothing.
+    run("git", "add", "-A", "--", *[p for p in OWNED if Path(p).exists()
+                                    or run("git", "ls-files", "--", p)])
     if dry_run:
         print(run("git", "--no-pager", "diff", "--no-ext-diff", "--cached"))
         print(pr["body"])
@@ -448,11 +452,15 @@ def propose_all(a):
     for branch in branches:
         for check in (check_pandoc, check_crossref):
             run("git", "switch", "-q", "--detach", f"origin/{branch}")
-            pr = check(branch)
-            if pr:
-                propose(branch, pr, a.dry_run)
-            run("git", "reset", "-q", "--hard")
-            run("git", "clean", "-qfd", "--", "patches")
+            try:
+                pr = check(branch)
+                if pr:
+                    propose(branch, pr, a.dry_run)
+            finally:
+                # Also on failure, so nothing staged follows main() back
+                # to the starting branch
+                run("git", "reset", "-q", "--hard")
+                run("git", "clean", "-qfd", "--", "patches")
             if pr and check is check_pandoc:
                 break  # a release PR covers main's crossref too
 
