@@ -5,9 +5,9 @@ Two checks, each of which edits the checked-out branch and, if anything
 changed, pushes it as bot/<...> and opens a PR against that branch:
 
   pandoc    (main only) a new jgm/pandoc release: PANDOC_VERSION, INDEX_STATE,
-            the ghc-musl image and GHC upstream builds with, CROSSREF_TAG (or a
-            bounds patch, and the old version's crossref skip list if the tag
-            stays), build numbers reset; the PR body lists what in upstream's
+            the ghc-musl image, GHC and cabal upstream builds with,
+            CROSSREF_TAG (or a bounds patch, and the old version's crossref
+            skip list if the tag stays), build numbers reset; the PR body lists what in upstream's
             diff needs a human look.
   crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
             it, drop our patches for the old tag.
@@ -303,8 +303,8 @@ def check_pandoc(branch):
                                  f"ghc-musl:{new_minor}")
             review.append(f"**GHC moved** from {old_minor} to {new_minor} "
                           f"(`ghc-musl:{new_minor}` is GHC {ghc}). Check "
-                          "`release-candidate.yml` and `CABAL_VERSION`; the "
-                          "macOS and Windows jobs take `GHC_VERSION` too.")
+                          "`release-candidate.yml`; the macOS and Windows "
+                          "jobs take `GHC_VERSION` too.")
             labels.append("needs-review")
         rc = show(new, ".github/workflows/release-candidate.yml")
         for m in sorted(set(re.findall(r"ghc --set ([\d.]+)", rc))):
@@ -314,6 +314,28 @@ def check_pandoc(branch):
                 labels.append("needs-review")
         set_pin("GHC_VERSION", ghc)
         set_image(ghc)
+
+        # cabal-install for the macOS and Windows jobs (Linux uses the
+        # image's, as upstream does): what release-candidate.yml installs
+        cabal = pins["CABAL_VERSION"]
+        cabals = sorted(set(re.findall(r"ghcup install cabal --set ([\d.]+)",
+                                       rc)))
+        same = lambda v: cabal == v or cabal.startswith(v + ".")
+        if len(cabals) > 1:
+            review.append(f"`release-candidate.yml` installs cabal "
+                          f"{', '.join(cabals)}; `CABAL_VERSION` stays {cabal}.")
+            labels.append("needs-review")
+        elif cabals and not same(cabals[0]):
+            if cabals[0].count(".") == 3:
+                review.append(f"**cabal moved** from {cabal} to {cabals[0]} "
+                              "(`release-candidate.yml`), for the macOS and "
+                              "Windows jobs.")
+                set_pin("CABAL_VERSION", cabals[0])
+            else:
+                review.append(f"`release-candidate.yml` installs cabal "
+                              f"{cabals[0]}: set `CABAL_VERSION` to its "
+                              "exact version.")
+            labels.append("needs-review")
 
         # pandoc API
         apis = []
