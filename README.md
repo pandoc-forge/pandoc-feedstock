@@ -74,7 +74,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 2. **`pins.env` on `main`:**
    - `PANDOC_VERSION`: the new tag.
    - `INDEX_STATE`: the GitHub release's `publishedAt` (`gh release view <tag> -R jgm/pandoc --json publishedAt`).
-   - `GHC_VERSION`, `CABAL_VERSION`: what upstream's release builds use (`.circleci/config.yml`, `.github/workflows/release-candidate.yml`).
+   - `GHC_VERSION`, `CABAL_VERSION`: what upstream's release builds use (`.circleci/config.yml`, `.github/workflows/release-candidate.yml`). `CABAL_VERSION` is for macOS and Windows; Linux uses the image's cabal, as upstream does.
    - `GHC_MUSL_IMAGE`: `quay.io/benz0li/ghc-musl:<GHC_VERSION>`, the tag for exactly that GHC.
    - `CROSSREF_TAG`: the newest tag whose `pandoc` bounds admit the new version. If none does yet, keep the newest tag and add `patches/pandoc-crossref/<tag>/*.patch` relaxing its bounds (`pandoc-crossref.cabal` and `package.yaml`). crossref's test suites decide whether it ships.
    - Reset `PANDOC_BUILD_NUMBER`, `PANDOC_WASM_BUILD_NUMBER` and `CROSSREF_BUILD_NUMBER` to 0.
@@ -100,7 +100,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 
 `.github/workflows/bump.yml` runs `scripts/bot.py` daily, and it opens a PR for each of the updates above that is mechanical:
 
-- **A new pandoc release** (on `main`): `PANDOC_VERSION`, `INDEX_STATE`, GHC and the image from upstream's CircleCI config, `CROSSREF_TAG` or a generated bounds patch, and build numbers reset. The PR body lists what in upstream's diff needs a look: GHC, the pandoc API, flags and `cabal.project`, the wasm toolchain, and new Lua API. It's labelled `needs-review`, `pandoc-api` or `crossref-patched` when that applies. Steps 1 and 5–7 of the checklist stay manual.
+- **A new pandoc release** (on `main`): `PANDOC_VERSION`, `INDEX_STATE`, GHC and the image from upstream's CircleCI config, cabal from its `release-candidate.yml`, `CROSSREF_TAG` or a generated bounds patch, and build numbers reset. The PR body lists what in upstream's diff needs a look: GHC, the pandoc API, flags and `cabal.project`, the wasm toolchain, and new Lua API. It's labelled `needs-review`, `pandoc-api` or `crossref-patched` when that applies. Steps 1 and 5–7 of the checklist stay manual.
 - **A newer pandoc-crossref tag** admitting a branch's pandoc.
 
 A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]` on a clean tree (it checks out each branch, resets it, and returns to where it started).
