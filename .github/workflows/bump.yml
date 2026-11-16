@@ -1,8 +1,8 @@
 name: Bump
 
 # Daily, propose pins.env updates as PRs (scripts/bot.py): a new pandoc
-# release on main, a ghc-musl digest that quay deleted, a newer
-# pandoc-crossref tag. The PRs are opened with the pandoc-forge-bot GitHub
+# release on main, a newer pandoc-crossref tag; and open an issue when a conda-forge package pins a
+# pandoc that no branch builds. The PRs are opened with the pandoc-forge-bot GitHub
 # App's token rather than GITHUB_TOKEN, because events from GITHUB_TOKEN
 # don't trigger workflows, and build.yml must run on them. Inert until the
 # App is set up (README: Automation). PRs that change the bot get a dry run,
@@ -53,8 +53,8 @@ jobs:
           SLUG: ${{ steps.app.outputs.app-slug }}
         run: |
           id=$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)
-          git config user.name "$SLUG[bot]"
-          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git config user.name "${SLUG}[bot]"
+          git config user.email "$id+${SLUG}[bot]@users.noreply.github.com"
 
       - name: Propose updates
         env:

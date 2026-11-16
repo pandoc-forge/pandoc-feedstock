@@ -13,13 +13,22 @@ changed, pushes it as bot/<...> and opens a PR against that branch:
             it, drop our patches for the old tag, and reset its build number,
             or raise it if the new tag keeps the old one's cabal version.
 
+And one that opens an issue instead, since only a person can decide it:
+
+  downstream  the newest version of a conda-forge package pins a pandoc
+            (`pandoc 3.10`, `==3.10` or `3.10.*`) that neither main nor a
+            v* branch builds, so with pandoc-forge first a solver picks an
+            older version of that package. A pandoc release PR also says
+            when the outgoing version is the only one such a pin admits.
+
 A bot branch that already exists on the remote is never touched again, so a
-closed PR stays closed. Merging and releasing stay manual. It checks out
+closed PR stays closed, and the same goes for an issue's title. Merging and releasing stay manual. It checks out
 each branch in turn and resets it, so it refuses to run on a dirty tree
 (commit a change to the bot before a local dry run), and returns to the
 branch it started on.
 
-Usage: bot.py [--dry-run] [BRANCH...]   (default: main and every origin/v*)
+Usage: bot.py [--dry-run] [BRANCH...]   (default: main and every origin/v*,
+                                         and the downstream check)
 """
 
 import argparse
@@ -36,6 +45,7 @@ from pathlib import Path
 PANDOC_REPO = "jgm/pandoc"
 CROSSREF_REPO = "lierdakil/pandoc-crossref"
 IMAGE_REPO = "benz0li/ghc-musl"
+CONDA_FORGE = "https://conda.anaconda.org/conda-forge"
 PINS = Path("pins.env")
 # The only paths the bot changes, stages or resets
 OWNED = ["pins.env", "patches"]
@@ -252,6 +262,105 @@ def switch_crossref(old, new, version):
     set_crossref(new, version)
 
 
+# --- downstream pins on conda-forge ---------------------------------------
+
+def built_versions():
+    """PANDOC_VERSION on main and on every v* branch of origin."""
+    refs = run("git", "branch", "-r", "--format=%(refname:short)", "--list",
+               "origin/main", "origin/v*").split()
+    return {re.search(r"^PANDOC_VERSION=(.*)$",
+                      run("git", "show", f"{r}:pins.env"), re.M)[1]
+            for r in refs}
+
+
+def spec_pins(spec):
+    """The pins in a dependency's version spec, a tuple of alternatives
+    (`3.10`, `==3.10`, `3.10.*`, `3.4|3.6.3`), or None for a looser spec
+    such as `>=3.10,<3.11`."""
+    alts = spec.split()[0].split("|") if spec.split() else []
+    pins = [re.fullmatch(r"(?:==)?(\d+(?:\.\d+)*(?:\.\*)?)", a) for a in alts]
+    return tuple(m[1] for m in pins) if pins and all(pins) else None
+
+
+def satisfies(version, pin):
+    """conda's semantics: 3.10 is 3.10.0, and 3.10.* takes 3.10 and 3.10.x."""
+    v = ver(version)
+    if pin.endswith(".*"):
+        p = ver(pin[:-2])
+        return (v + (0,) * len(p))[:len(p)] == p
+    strip = lambda t: t[:max((i + 1 for i, x in enumerate(t) if x), default=0)]
+    return strip(v) == strip(ver(pin))
+
+
+def version_key(v):
+    """Close enough to conda's version order to find a package's newest:
+    letters sort below numbers, and a missing part is 0 (2.0rc1 < 2.0)."""
+    key = [(1, int(x)) if x.isdigit() else (0, x)
+           for x in re.findall(r"\d+|[a-z]+", v.lower())]
+    return key + [(1, 0)] * (12 - len(key))
+
+
+@functools.cache
+def downstream_pins():
+    """{pins: {"name version", ...}}: how the newest version of each
+    conda-forge package pins pandoc, from current_repodata.json (linux-64
+    and noarch). That file also keeps some older versions (quarto 1.5.57
+    pins 3.2), which aren't new pins and are left out."""
+    newest = {}
+    for subdir in ("linux-64", "noarch"):
+        status, body = http(f"{CONDA_FORGE}/{subdir}/current_repodata.json",
+                            {"User-Agent": "pandoc-forge-bot"})
+        if status != 200:
+            raise SystemExit(f"conda-forge {subdir} repodata: HTTP {status}")
+        d = json.loads(body)
+        for r in [*d.get("packages", {}).values(),
+                  *d.get("packages.conda", {}).values()]:
+            k = (subdir, r["name"])
+            if k not in newest or (version_key(r["version"])
+                                   > version_key(newest[k][0]["version"])):
+                newest[k] = [r]
+            elif r["version"] == newest[k][0]["version"]:
+                newest[k].append(r)
+    found = {}
+    for records in newest.values():
+        for r in records:
+            for dep in r.get("depends", []):
+                name, _, spec = dep.partition(" ")
+                pins = name == "pandoc" and spec_pins(spec)
+                if pins:
+                    found.setdefault(pins, set()).add(f"{r['name']} {r['version']}")
+    return found
+
+
+def unbuilt_pins(versions):
+    """{pins: packages} for the downstream pins that none of `versions`
+    satisfies."""
+    return {pins: pkgs for pins, pkgs in downstream_pins().items()
+            if not any(satisfies(v, p) for v in versions for p in pins)}
+
+
+def check_downstream():
+    """An issue per downstream pin that no branch builds."""
+    built = sorted(built_versions(), key=ver, reverse=True)
+    issues = []
+    for pins, pkgs in sorted(unbuilt_pins(built).items()):
+        pin = " | ".join(pins)
+        series = ".".join(pins[0].removesuffix(".*").split(".")[:2])
+        issues.append(dict(
+            title=f"Downstream pin: pandoc {pin}",
+            body=f"On conda-forge, the newest {', '.join(sorted(pkgs))} "
+                 f"depends on `pandoc {pin}`. No branch builds it (main and "
+                 f"v*: {', '.join(built)}), so with pandoc-forge listed "
+                 "first a solver silently picks an older version of "
+                 f"{'that package' if len(pkgs) == 1 else 'those packages'}."
+                 f"\n\nTo build it, branch `v{series}.x` from `main` and "
+                 "change only `pins.env` (README: Older pandoc versions), "
+                 "then release it. If it isn't worth a branch, close this "
+                 "issue: the bot won't open it again.",
+            labels=["downstream-pin"]))
+    return issues
+
+
 # --- checks --------------------------------------------------------------
 
 def check_crossref(branch):
@@ -407,6 +516,17 @@ def check_pandoc(branch):
                           "(doc/lua-filters.md): filters using it need "
                           f"`>={new}` run constraints.")
 
+    # Downstream pins that, once main moves on, no branch would satisfy
+    old_series = ".".join(old.split(".")[:2])
+    for pins, pkgs in sorted(unbuilt_pins(built_versions() - {old} | {new})
+                             .items()):
+        if any(satisfies(old, p) for p in pins):
+            review.append(f"**On conda-forge, the newest {', '.join(sorted(pkgs))} "
+                          f"depends on `pandoc {' | '.join(pins)}`**, which "
+                          f"only {old} satisfies: branch `v{old_series}.x` "
+                          "from `main` before merging.")
+            labels.append("needs-branch")
+
     set_pin("PANDOC_VERSION", new)
     set_pin("INDEX_STATE", rel["publishedAt"])
     for k in ("PANDOC_BUILD_NUMBER", "PANDOC_WASM_BUILD_NUMBER",
@@ -474,6 +594,24 @@ def propose(base, pr, dry_run):
     print("  ", run(*args))
 
 
+def propose_issue(issue, dry_run):
+    print(f"== issue: {issue['title']}")
+    # Every issue, closed ones too: closing declines it for good
+    if issue["title"] in {i["title"] for i in gh_json(
+            "issue", "list", "--state", "all", "--limit", "1000",
+            "--json", "title")}:
+        print("   already opened; skipping")
+        return
+    if dry_run:
+        print(issue["body"])
+        return
+    args = ["gh", "issue", "create", "-t", issue["title"], "-b", issue["body"]]
+    for label in issue["labels"]:
+        run("gh", "label", "create", label, "--force")
+        args += ["--label", label]
+    print("  ", run(*args))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dry-run", action="store_true",
@@ -512,6 +650,9 @@ def propose_all(a):
                 run("git", "clean", "-qfd", "--", "patches")
             if pr and check is check_pandoc:
                 break  # a release PR covers main's crossref too
+    if not a.branches:
+        for issue in check_downstream():
+            propose_issue(issue, a.dry_run)
 
 
 if __name__ == "__main__":
