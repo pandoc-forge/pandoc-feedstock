@@ -6,12 +6,17 @@
 # target. JSON filters depend on `pandoc` and `pandoc-api 1.23.*`; Lua
 # filters, which run on either engine, depend on `pandoc-api 1.23.*` only.
 #
+# Since every environment with an engine or a filter has pandoc-api, its
+# activation scripts are where the environment's share/pandoc goes into
+# PANDOC_DATA_DIRS: pandoc 3.14 and later then find the filters, templates
+# and other data files installed there by name.
+#
 # CI sets PANDOC_API_VERSION from pandoc.cabal; locally:
 #
 #   PANDOC_API_VERSION=$(scripts/pandoc-api-version.sh pandoc-src) rattler-build build -r recipes/pandoc-api
 context:
   version: ${{ env.get("PANDOC_API_VERSION") }}
-  build_number: 1
+  build_number: 2
 
 package:
   name: pandoc-api
@@ -21,11 +26,50 @@ build:
   number: ${{ build_number }}
   noarch: generic
   string: pandoc_forge_${{ build_number }}
+  # The scripts for every shell, on every platform. Every CI job builds this
+  # package and the upload keeps one copy, so .gitattributes fixes their line
+  # endings and the copies are the same.
+  script:
+    - if: unix
+      then:
+        - mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"
+        - for ext in sh bat ps1; do cp "$RECIPE_DIR/activate.$ext" "$PREFIX/etc/conda/activate.d/pandoc-api_activate.$ext" && cp "$RECIPE_DIR/deactivate.$ext" "$PREFIX/etc/conda/deactivate.d/pandoc-api_deactivate.$ext"; done
+      else:
+        - mkdir "%PREFIX%\etc\conda\activate.d" "%PREFIX%\etc\conda\deactivate.d"
+        - copy /b "%RECIPE_DIR%\activate.sh" "%PREFIX%\etc\conda\activate.d\pandoc-api_activate.sh"
+        - copy /b "%RECIPE_DIR%\activate.bat" "%PREFIX%\etc\conda\activate.d\pandoc-api_activate.bat"
+        - copy /b "%RECIPE_DIR%\activate.ps1" "%PREFIX%\etc\conda\activate.d\pandoc-api_activate.ps1"
+        - copy /b "%RECIPE_DIR%\deactivate.sh" "%PREFIX%\etc\conda\deactivate.d\pandoc-api_deactivate.sh"
+        - copy /b "%RECIPE_DIR%\deactivate.bat" "%PREFIX%\etc\conda\deactivate.d\pandoc-api_deactivate.bat"
+        - copy /b "%RECIPE_DIR%\deactivate.ps1" "%PREFIX%\etc\conda\deactivate.d\pandoc-api_deactivate.ps1"
 
 requirements:
   run_constraints:
     - pandoc * *pandoc_forge*
     - pandoc-wasm * *pandoc_forge*
+
+tests:
+  - package_contents:
+      files:
+        - etc/conda/activate.d/pandoc-api_activate.sh
+        - etc/conda/activate.d/pandoc-api_activate.bat
+        - etc/conda/activate.d/pandoc-api_activate.ps1
+        - etc/conda/deactivate.d/pandoc-api_deactivate.sh
+        - etc/conda/deactivate.d/pandoc-api_deactivate.bat
+        - etc/conda/deactivate.d/pandoc-api_deactivate.ps1
+  # The test environment is activated (activate.sh on Unix, activate.bat on
+  # Windows); the scripts check that and then (de)activate by hand.
+  - files:
+      recipe:
+        - test-activation.sh
+        - test-activation.bat
+    script:
+      - if: unix
+        then:
+          - bash test-activation.sh
+        else:
+          - call test-activation.bat
+          - if errorlevel 1 exit 1
 
 about:
   homepage: https://github.com/pandoc-forge/pandoc-feedstock
