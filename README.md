@@ -72,7 +72,7 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 What changed upstream decides the work, so this list is a starting point, not a complete procedure. Start from the release notes and the diff since the previous tag: <https://github.com/jgm/pandoc/releases/latest>, and `git diff <old>..<new> -- pandoc.cabal cabal.project flake.lock Makefile .circleci .github/workflows wasm` in a jgm/pandoc clone.
 
-1. **Keep the previous version buildable.** If a downstream package pins it exactly (e.g. quarto on conda-forge), or it is the newest pandoc with an unpatched pandoc-crossref, branch `v<old>.x` from `main` first.
+1. **Keep the previous version buildable.** If a downstream package pins it exactly (e.g. quarto on conda-forge; the bot's PR says so and is labelled `needs-branch`), or it is the newest pandoc with an unpatched pandoc-crossref, branch `v<old>.x` from `main` first.
 2. **`pins.env` on `main`:**
    - `PANDOC_VERSION`: the new tag.
    - `INDEX_STATE`: the GitHub release's `publishedAt` (`gh release view <tag> -R jgm/pandoc --json publishedAt`).
@@ -105,7 +105,9 @@ What changed upstream decides the work, so this list is a starting point, not a 
 - **A new pandoc release** (on `main`): `PANDOC_VERSION`, `INDEX_STATE`, GHC and the image from upstream's CircleCI config, cabal from its `release-candidate.yml`, `CROSSREF_TAG` or a generated bounds patch, and build numbers reset. The PR body lists what in upstream's diff needs a look: GHC, the pandoc API, flags and `cabal.project`, the wasm toolchain, and new Lua API. It's labelled `needs-review`, `pandoc-api` or `crossref-patched` when that applies. Steps 1 and 5–7 of the checklist stay manual.
 - **A newer pandoc-crossref tag** admitting a branch's pandoc.
 
-A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]` on a clean tree (it checks out each branch, resets it, and returns to where it started).
+It also opens an **issue** (labelled `downstream-pin`) when the newest version of a conda-forge package pins a pandoc that no branch builds: `pandoc 3.10`, `==3.10` or `3.10.*` in its dependencies (`current_repodata.json`, linux-64 and noarch). With pandoc-forge first, a solver would quietly pick an older version of that package, as it did with quarto 1.10 and 1.11, which pin 3.10. Whether to add a `v*` branch is for a person to decide.
+
+A `bot/…` branch that already exists is never pushed again, so closing a PR declines that update, and closing an issue declines that pin. Run it by hand with Actions → Bump → Run workflow (`dry-run` prints the changes instead), or locally with `python3 scripts/bot.py --dry-run [branch...]` on a clean tree (it checks out each branch, resets it, and returns to where it started).
 
 It opens PRs as the **pandoc-forge-bot** GitHub App, because PRs opened with `GITHUB_TOKEN` don't trigger `build.yml`. To set it up (once, as an org owner):
 
