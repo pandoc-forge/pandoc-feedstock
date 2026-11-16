@@ -1,0 +1,11 @@
+# Tests of pandoc-crossref v0.3.25a that fail against pandoc 3.10 because
+# pandoc's output changed, not because of a crossref bug: one hspec path per
+# line, passed to both test suites as --skip (scripts/build-crossref.sh).
+# v0.3.25's tests were made with pandoc 3.10.1 (its release notes: "built
+# with Pandoc v3.10.1"), whose Markdown writer double-quotes YAML metadata
+# strings that would read as numbers (jgm/pandoc#11715, in 3.10.1's
+# changelog). 3.10 writes crossref's metadata string "0" unquoted, on all
+# five platforms (2026-11-16):
+#   expected: sectionsDepth: "0"
+#    but got: sectionsDepth: 0
+/Integrative tests/standalone-listOfMetadata/Markdown/
