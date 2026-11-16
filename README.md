@@ -54,7 +54,7 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 ## Publishing
 
-- Pushes to `main` upload whatever built to `pandoc-forge/dev`, each package with a Sigstore attestation that this repository's `build.yml` built it (on prefix.dev, and in GitHub's attestation store).
+- Pushes to `main` upload whatever built and isn't there yet to `pandoc-forge/dev`, each package with a Sigstore attestation that this repository's `build.yml` built it (on prefix.dev, and in GitHub's attestation store).
 - Releases to `pandoc-forge` are manual: run the workflow from `main` or a `v*` branch with `channel: pandoc-forge`. A release doesn't rebuild: it **promotes** the dev channel's files that the branch's `pins.env` names (`scripts/promote.py`), so what was checked in `pandoc-forge/dev` is what is released, byte for byte. It needs pandoc for every platform, pandoc-wasm (3.9 and later) and pandoc-api, and takes pandoc-crossref only if it is there for every platform. It leaves out what is already released, checks each file's sha256 against the dev channel and its attestation (`gh attestation verify --repo pandoc-forge/pandoc-feedstock`), and uploads them with an attestation of their own. The job runs in the `release` GitHub environment, which is limited to `main` and `v*`. To see what a release would copy, run `python3 scripts/promote.py <dir>` locally.
 
 ## Older pandoc versions
