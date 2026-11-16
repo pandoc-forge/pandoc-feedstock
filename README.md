@@ -54,8 +54,8 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 ## Publishing
 
-- Pushes to `main` upload whatever built to `pandoc-forge/dev`.
-- Releases to `pandoc-forge` are manual: run the workflow from `main` or a `v*` branch with `channel: pandoc-forge`. It uploads only if every platform built. The upload job runs in the `release` GitHub environment, which is limited to `main` and `v*`.
+- Pushes to `main` upload whatever built to `pandoc-forge/dev`, each package with a Sigstore attestation that this repository's `build.yml` built it (on prefix.dev, and in GitHub's attestation store).
+- Releases to `pandoc-forge` are manual: run the workflow from `main` or a `v*` branch with `channel: pandoc-forge`. A release doesn't rebuild: it **promotes** the dev channel's files that the branch's `pins.env` names (`scripts/promote.py`), so what was checked in `pandoc-forge/dev` is what is released, byte for byte. It needs pandoc for every platform, pandoc-wasm (3.9 and later) and pandoc-api, and takes pandoc-crossref only if it is there for every platform. It leaves out what is already released, checks each file's sha256 against the dev channel and its attestation (`gh attestation verify --repo pandoc-forge/pandoc-feedstock`), and uploads them with an attestation of their own. The job runs in the `release` GitHub environment, which is limited to `main` and `v*`. To see what a release would copy, run `python3 scripts/promote.py <dir>` locally.
 
 ## Older pandoc versions
 
@@ -63,7 +63,7 @@ Pre-release and test builds go to `https://prefix.dev/pandoc-forge/dev`.
 
 ## Publishing details
 
-- Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new build number (`*_BUILD_NUMBER` in `pins.env`).
+- Uploads try prefix.dev trusted publishing first and fall back to the `PREFIX_API_KEY` secret. They never overwrite: a fix to a published version needs a new build number (`*_BUILD_NUMBER` in `pins.env`). Attestations need trusted publishing, so a dev upload that fell back to the key has none, and a release refuses to promote it: rebuild it with a new build number.
 - The target channels default to `pandoc-forge/dev` and `pandoc-forge` (the `pandoc-forge` group's primary channel). The repo variables `PREFIX_DEV_CHANNEL` and `PREFIX_RELEASE_CHANNEL` override them.
 
 ## Updating
@@ -90,7 +90,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 4. **Try it locally** where it's cheap: the Linux build in the ghc-musl container (`build-native.sh`, then `build-crossref.sh`) shows most problems in about 20 minutes.
 5. **Open a PR.** PR runs build and test everything on every platform without uploading. On a PR, a job fails if pandoc-crossref didn't build, pass its tests and package (on pushes it doesn't, so that pandoc still uploads).
 6. **Merge**, which uploads to `pandoc-forge/dev`. Check it from there: `pandoc --version`, `pandoc` + `pandoc-crossref` (no version warning), a Lua filter such as `pandoc-amsthm`, and that `quarto` still resolves to the pandoc it pins.
-7. **Release:** Actions → Build → Run workflow on `main` → `channel: pandoc-forge`.
+7. **Release:** Actions → Build → Run workflow on `main` → `channel: pandoc-forge`. It copies the files checked in step 6, which takes about a minute.
 
 ### Other updates
 
