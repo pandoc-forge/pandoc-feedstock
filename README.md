@@ -93,7 +93,7 @@ What changed upstream decides the work, so this list is a starting point, not a 
 ### Other updates
 
 - **Packaging change for an already-published version:** on that version's branch, bump the affected `*_BUILD_NUMBER` in `pins.env`.
-- **New pandoc-crossref release:** on each branch whose pandoc the new tag's `pandoc` bounds admit, set `CROSSREF_TAG`, delete `patches/pandoc-crossref/<old tag>/`, and reset `CROSSREF_BUILD_NUMBER` to 0. Its pandoc packages already exist and are skipped on upload.
+- **New pandoc-crossref release:** on each branch whose pandoc the new tag's `pandoc` bounds admit, set `CROSSREF_TAG`, delete `patches/pandoc-crossref/<old tag>/`, and reset `CROSSREF_BUILD_NUMBER` to 0. Its pandoc packages already exist and are skipped on upload. If the new tag has the old one's cabal version (v0.3.26a and v0.3.26b are both 0.3.26), raise `CROSSREF_BUILD_NUMBER` past the published builds instead: the package name would otherwise be one already published, and the upload would skip it.
 - **Build changes** go on `main` and are then merged into each `v*` branch. `pins.env` is the only file that differs, so a merge conflict can only be there: keep the branch's values.
 
 ### Automation

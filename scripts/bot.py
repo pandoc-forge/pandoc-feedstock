@@ -10,7 +10,8 @@ changed, pushes it as bot/<...> and opens a PR against that branch:
             skip list if the tag stays), build numbers reset; the PR body lists what in upstream's
             diff needs a human look.
   crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
-            it, drop our patches for the old tag.
+            it, drop our patches for the old tag, and reset its build number,
+            or raise it if the new tag keeps the old one's cabal version.
 
 A bot branch that already exists on the remote is never touched again, so a
 closed PR stays closed. Merging and releasing stay manual. It checks out
@@ -22,6 +23,7 @@ Usage: bot.py [--dry-run] [BRANCH...]   (default: main and every origin/v*)
 """
 
 import argparse
+import functools
 import json
 import re
 import subprocess
@@ -136,10 +138,22 @@ def admits(bound, version):
     return True
 
 
-def crossref_bound(tag):
+@functools.cache
+def crossref_cabal(tag):
     _, body = http(f"https://raw.githubusercontent.com/{CROSSREF_REPO}/"
                    f"{tag}/pandoc-crossref.cabal")
-    return pandoc_bound(body)
+    return body
+
+
+def crossref_bound(tag):
+    return pandoc_bound(crossref_cabal(tag))
+
+
+def crossref_version(tag):
+    """The package version in the tag's cabal file: tags with a letter
+    suffix (v0.3.26a, v0.3.26b) can share one."""
+    m = re.search(r"^version:\s*(\S+)", crossref_cabal(tag), re.M | re.I)
+    return m and m.group(1)
 
 
 def patched_bound(tag):
@@ -254,14 +268,27 @@ def check_crossref(branch):
         return None
     patched = patched_bound(current)
     switch_crossref(current, tag, version)
-    set_pin("CROSSREF_BUILD_NUMBER", "0")
+    # The package is pandoc-crossref <cabal version>-pandoc<version>_..._<n>.
+    # A new cabal version starts again at build 0. The same one (v0.3.26a ->
+    # v0.3.26b) must go past the builds already published, which uploads
+    # would otherwise skip. If a version can't be read, take the safe side.
+    new_v, old_v = crossref_version(tag), crossref_version(current)
+    if new_v and old_v and new_v != old_v:
+        build = 0
+        why = "resets to 0"
+    else:
+        build = int(pins["CROSSREF_BUILD_NUMBER"]) + 1
+        why = (f"goes to {build}: {tag} has {current}'s cabal version "
+               f"({new_v}), so a lower build number names a package already "
+               "built, which the upload would skip")
+    set_pin("CROSSREF_BUILD_NUMBER", str(build))
     return dict(
         branch=f"bot/crossref-{tag}-{branch}",
         title=f"{branch}: pandoc-crossref {tag}",
         body=f"pandoc-crossref {tag} admits pandoc {version} (`{bound}`), so "
              f"it replaces {current}"
              + (" and our bounds patch for it is dropped" if patched else "")
-             + ". `CROSSREF_BUILD_NUMBER` resets to 0; the pandoc packages "
+             + f". `CROSSREF_BUILD_NUMBER` {why}. The pandoc packages "
              "already exist and are skipped on upload.",
         labels=["crossref"])
 
