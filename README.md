@@ -7,7 +7,7 @@ Builds [pandoc](https://pandoc.org) from source for the `pandoc-forge` conda cha
 | `pandoc` | linux-64, linux-aarch64, osx-64, osx-arm64, win-64 | `pandoc` (plus `pandoc-lua` and `pandoc-server` symlinks on Unix) and its man pages. Statically linked on Linux, with data files embedded and `+lua +server +http` |
 | `pandoc-wasm` | noarch | `share/pandoc-wasm/pandoc.wasm`, a WASI module |
 | `pandoc-crossref` | same as `pandoc` | `pandoc-crossref`, statically linked against the same pandoc library as the `pandoc` binary, and pinned to that exact pandoc (`pandoc ==3.12 *pandoc_forge*`). Build strings name the pandoc version, e.g. `pandoc3_12_pandoc_forge_0` |
-| `pandoc-api` | noarch | Nothing. Its version is the pandoc API version (pandoc-types major.minor, e.g. `1.23`) |
+| `pandoc-api` | noarch | Activation scripts that add the environment's `share/pandoc` to `PANDOC_DATA_DIRS`. Its version is the pandoc API version (pandoc-types major.minor, e.g. `1.23`) |
 
 ## pandoc-crossref
 
@@ -24,6 +24,8 @@ pandoc-crossref warns whenever it runs through a pandoc other than the one it wa
 This works like conda-forge's `python_abi`. Each `pandoc` and `pandoc-wasm` depends on the `pandoc-api` version it speaks, and `pandoc-api` only allows pandoc-forge builds of pandoc (`run_constraints: pandoc * *pandoc_forge*`). `pandoc-api` also constrains `pandoc-wasm` the same way. An environment therefore has one pandoc API, which all its engines speak and all its filters target. A JSON filter depends on `pandoc` and `pandoc-api 1.23.*`, and gets a pandoc-forge pandoc whose JSON AST it can read. A Lua filter runs on either engine, so it depends on `pandoc-api 1.23.*` only, and the environment chooses the engine. If a higher-priority channel supplies pandoc instead, the solve fails rather than mixing builds.
 
 CI reads the version from the `pandoc-types` bound in the tag's `pandoc.cabal` (`scripts/pandoc-api-version.sh`), so no one maintains the mapping. Every branch builds the same `pandoc-api`, and uploads skip the copies that already exist.
+
+Since every environment with an engine or a filter has `pandoc-api`, its activation scripts (`sh`, `bat` and `ps1`) add the environment's `share/pandoc` to the front of `PANDOC_DATA_DIRS`, and deactivation takes it out again. pandoc 3.14 and later search those directories after the user data directory, so a Lua filter installed in `share/pandoc/filters` works by name, `pandoc -L amsthm.lua`, as do templates and other data files installed there. Older pandoc ignores the variable, and needs the full path (`-L "$CONDA_PREFIX/share/pandoc/filters/amsthm.lua"`). Each job packages `pandoc-api` and the upload keeps one copy, so `.gitattributes` fixes the scripts' line endings.
 
 ## Install
 
