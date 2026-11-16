@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+"""Propose pins.env updates as pull requests (run daily by bump.yml).
+
+Two checks, each of which edits the checked-out branch and, if anything
+changed, pushes it as bot/<...> and opens a PR against that branch:
+
+  pandoc    (main only) a new jgm/pandoc release: PANDOC_VERSION, INDEX_STATE,
+            the ghc-musl image, GHC and cabal upstream builds with,
+            CROSSREF_TAG (or a bounds patch, and the old version's crossref
+            skip list if the tag stays), build numbers reset; the PR body lists what in upstream's
+            diff needs a human look.
+  crossref  a newer pandoc-crossref tag admits the branch's pandoc: switch to
+            it, drop our patches for the old tag, and reset its build number,
+            or raise it if the new tag keeps the old one's cabal version.
+
+And one that opens an issue instead, since only a person can decide it:
+
+  downstream  the newest version of a conda-forge package pins a pandoc
+            (`pandoc 3.10`, `==3.10` or `3.10.*`) that neither main nor a
+            v* branch builds, so with pandoc-forge first a solver picks an
+            older version of that package. A pandoc release PR also says
+            when the outgoing version is the only one such a pin admits.
+
+A bot branch that already exists on the remote is never touched again, so a
+closed PR stays closed, and the same goes for an issue's title. Merging and releasing stay manual. It checks out
+each branch in turn and resets it, so it refuses to run on a dirty tree
+(commit a change to the bot before a local dry run), and returns to the
+branch it started on.
+
+Usage: bot.py [--dry-run] [BRANCH...]   (default: main and every origin/v*,
+                                         and the downstream check)
+"""
+
+import argparse
+import functools
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+PANDOC_REPO = "jgm/pandoc"
+CROSSREF_REPO = "lierdakil/pandoc-crossref"
+IMAGE_REPO = "benz0li/ghc-musl"
+CONDA_FORGE = "https://conda.anaconda.org/conda-forge"
+PINS = Path("pins.env")
+# The only paths the bot changes, stages or resets
+OWNED = ["pins.env", "patches"]
+# Files of an upstream release whose changes can need work here
+# (README: Bumping to a new pandoc release).
+WATCH = ["pandoc.cabal", "cabal.project", "flake.lock", "Makefile",
+         ".circleci", ".github/workflows", "wasm"]
+
+
+def run(*cmd, cwd=None, check=True):
+    return subprocess.run(cmd, cwd=cwd, check=check, text=True,
+                          capture_output=True).stdout.strip()
+
+
+def http(url, headers=None, method="GET"):
+    req = urllib.request.Request(url, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, ""
+
+
+def gh_json(*args):
+    return json.loads(run("gh", *args))
+
+
+def ver(s):
+    return tuple(int(x) for x in s.split("."))
+
+
+# --- pins.env -----------------------------------------------------------
+
+def read_pins():
+    return dict(re.findall(r"^([A-Z_]+)=(.*)$", PINS.read_text(), re.M))
+
+
+def set_pin(key, value, comment=None, marker=None):
+    """Set KEY=value. With `marker`, the one-line comment just above that
+    starts with "# <marker>" (if any) describes this value: replace it with
+    `comment`, or drop it when `comment` is None."""
+    lines = PINS.read_text().splitlines()
+    i = next(n for n, l in enumerate(lines) if l.startswith(key + "="))
+    lines[i] = f"{key}={value}"
+    if marker is not None:
+        mine = lines[i - 1].startswith("# " + marker)
+        if mine:
+            del lines[i - 1]
+        if comment is not None:
+            lines.insert(i - 1 if mine else i, "# " + comment)
+    PINS.write_text("\n".join(lines) + "\n")
+
+
+# --- ghc-musl on quay ----------------------------------------------------
+
+def tag_digest(tag):
+    _, body = http(f"https://quay.io/api/v1/repository/{IMAGE_REPO}/tag/"
+                   f"?specificTag={tag}&onlyActiveTags=true")
+    tags = json.loads(body)["tags"] if body else []
+    return tags[0]["manifest_digest"] if tags else None
+
+
+def set_image(ghc):
+    """Use the ghc-musl tag for exactly GHC `ghc` (a tag, not a digest:
+    see pins.env)."""
+    if not tag_digest(ghc):
+        raise SystemExit(f"no ghc-musl tag {ghc} on quay")
+    set_pin("GHC_MUSL_IMAGE", f"quay.io/{IMAGE_REPO}:{ghc}")
+
+
+# --- pandoc-crossref -----------------------------------------------------
+
+def crossref_releases():
+    """Non-pre-release tags, newest first."""
+    rel = gh_json("release", "list", "-R", CROSSREF_REPO, "-L", "30",
+                  "--exclude-pre-releases", "--json", "tagName,publishedAt")
+    return [r["tagName"] for r in sorted(rel, key=lambda r: r["publishedAt"],
+                                         reverse=True)]
+
+
+def pandoc_bound(text):
+    """The pandoc constraint in a pandoc-crossref.cabal or package.yaml."""
+    m = (re.search(r'^\s*pandoc:\s*"([^"]+)"', text, re.M)
+         or re.search(r"^[\s,]*pandoc\s+([<>=^][^,\n]*\d)", text, re.M))
+    return m.group(1).strip() if m else None
+
+
+def admits(bound, version):
+    v = ver(version)
+    for part in bound.split("&&"):
+        op, x = re.match(r"\s*(\^>=|>=|<=|==|<|>)\s*([\d.*]+)", part).groups()
+        if x.endswith(".*"):
+            op, x = "^==", x[:-2]
+        x = ver(x)
+        ok = {">=": v >= x, "<=": v <= x, ">": v > x, "<": v < x,
+              "==": v == x, "^==": v[:len(x)] == x,
+              "^>=": v >= x and v[:2] == x[:2]}[op]
+        if not ok:
+            return False
+    return True
+
+
+@functools.cache
+def crossref_cabal(tag):
+    _, body = http(f"https://raw.githubusercontent.com/{CROSSREF_REPO}/"
+                   f"{tag}/pandoc-crossref.cabal")
+    return body
+
+
+def crossref_bound(tag):
+    return pandoc_bound(crossref_cabal(tag))
+
+
+def crossref_version(tag):
+    """The package version in the tag's cabal file: tags with a letter
+    suffix (v0.3.26a, v0.3.26b) can share one."""
+    m = re.search(r"^version:\s*(\S+)", crossref_cabal(tag), re.M | re.I)
+    return m and m.group(1)
+
+
+def patched_bound(tag):
+    """The pandoc bound after our patches for `tag`, if we have any."""
+    bounds = [pandoc_bound(l[1:]) for p in
+              sorted(Path(f"patches/pandoc-crossref/{tag}").glob("*.patch"))
+              for l in p.read_text().splitlines()
+              if l.startswith("+") and not l.startswith("+++")]
+    return next((b for b in bounds if b), None)
+
+
+def write_bounds_patch(tag, version):
+    """Write patches/pandoc-crossref/<tag>/ relaxing its pandoc upper bound to
+    the next major (PVP A.B) after `version`; return the new bound."""
+    major = ver(version)[:2]
+    upper = f"{major[0]}.{major[1] + 1}"
+    with tempfile.TemporaryDirectory() as tmp:
+        run("git", "clone", "-q", "--depth", "1", "--branch", tag,
+            f"https://github.com/{CROSSREF_REPO}", tmp)
+        for name, pat in [("package.yaml", r'(^\s*pandoc:\s*"[^"]*<\s*)[\d.]+'),
+                          ("pandoc-crossref.cabal",
+                           r"(^[\s,]*pandoc\s+[^,\n]*<\s*)[\d.]+")]:
+            f = Path(tmp, name)
+            if f.exists():
+                f.write_text(re.sub(pat, rf"\g<1>{upper}", f.read_text(),
+                                    flags=re.M))
+        diff = run("git", "diff", "--no-ext-diff", "--no-color", cwd=tmp)
+    d = Path(f"patches/pandoc-crossref/{tag}")
+    for old in d.glob("*.patch"):
+        old.unlink()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"0001-allow-pandoc-{version}.patch").write_text(
+        f"Allow pandoc {version} in pandoc-crossref {tag} "
+        f"(upstream: {crossref_bound(tag)}).\n"
+        "Only the bounds change; crossref's own test suites (flaky ones "
+        "included)\n"
+        f"must pass against pandoc {version} in CI "
+        "(scripts/build-crossref.sh).\n\n" + diff + "\n")
+    return patched_bound(tag)
+
+
+def pick_crossref(version, current):
+    """(tag, note): the newest tag admitting `version`, else `current`
+    with its bounds patched as needed."""
+    for tag in crossref_releases():
+        bound = crossref_bound(tag)
+        if bound and admits(bound, version):
+            return tag, f"{tag} admits pandoc {version} ({bound})."
+    bound = patched_bound(current)
+    if bound and admits(bound, version):
+        return current, (f"No tag admits pandoc {version}; our {current} "
+                         f"patch ({bound}) already does.")
+    bound = write_bounds_patch(current, version)
+    return current, (f"No tag admits pandoc {version}; "
+                     f"patches/pandoc-crossref/{current}/ now relaxes "
+                     f"its bound to `{bound}`. Its test suites decide "
+                     "whether it ships.")
+
+
+def carry_skips(tag, old, new):
+    """Copy the tag's skip list for pandoc `old` to `new`: what pandoc's
+    output changed in `old` it most likely still changes. Return a note for
+    the PR body, or None if there is no list."""
+    d = Path(f"patches/pandoc-crossref/{tag}")
+    src = d / f"skip-pandoc-{old}.txt"
+    if not src.exists():
+        return None
+    dst = d / f"skip-pandoc-{new}.txt"
+    dst.write_text(
+        f"# Carried over by scripts/bot.py from {src.name}: the reasons below\n"
+        f"# were recorded for pandoc {old}. Delete a line once that test\n"
+        f"# passes against {new}.\n#\n" + src.read_text())
+    n = sum(1 for l in src.read_text().splitlines()
+            if l.strip() and not l.startswith("#"))
+    return (f"`{src.name}` ({n} tests) is copied to `{dst.name}`, so crossref "
+            f"skips the tests that fail only because pandoc {old}'s output "
+            f"changed. New failures still fail the PR; a skipped test that "
+            f"{new} fixed stays skipped until it is deleted from the list.")
+
+
+def crossref_comment(tag, version):
+    """The pins.env comment on CROSSREF_TAG: only a patched tag has one."""
+    bound = crossref_bound(tag)
+    if not bound or admits(bound, version):
+        return None
+    major = ".".join(version.split(".")[:2])
+    return f"{tag} allows pandoc {bound}, so it is patched to admit {major}.x."
+
+
+def set_crossref(tag, version):
+    set_pin("CROSSREF_TAG", tag, crossref_comment(tag, version), marker="v")
+
+
+def switch_crossref(old, new, version):
+    run("git", "rm", "-rq", "--ignore-unmatch", f"patches/pandoc-crossref/{old}")
+    set_crossref(new, version)
+
+
+# --- downstream pins on conda-forge ---------------------------------------
+
+def built_versions():
+    """PANDOC_VERSION on main and on every v* branch of origin."""
+    refs = run("git", "branch", "-r", "--format=%(refname:short)", "--list",
+               "origin/main", "origin/v*").split()
+    return {re.search(r"^PANDOC_VERSION=(.*)$",
+                      run("git", "show", f"{r}:pins.env"), re.M)[1]
+            for r in refs}
+
+
+def spec_pins(spec):
+    """The pins in a dependency's version spec, a tuple of alternatives
+    (`3.10`, `==3.10`, `3.10.*`, `3.4|3.6.3`), or None for a looser spec
+    such as `>=3.10,<3.11`."""
+    alts = spec.split()[0].split("|") if spec.split() else []
+    pins = [re.fullmatch(r"(?:==)?(\d+(?:\.\d+)*(?:\.\*)?)", a) for a in alts]
+    return tuple(m[1] for m in pins) if pins and all(pins) else None
+
+
+def satisfies(version, pin):
+    """conda's semantics: 3.10 is 3.10.0, and 3.10.* takes 3.10 and 3.10.x."""
+    v = ver(version)
+    if pin.endswith(".*"):
+        p = ver(pin[:-2])
+        return (v + (0,) * len(p))[:len(p)] == p
+    strip = lambda t: t[:max((i + 1 for i, x in enumerate(t) if x), default=0)]
+    return strip(v) == strip(ver(pin))
+
+
+def version_key(v):
+    """Close enough to conda's version order to find a package's newest:
+    letters sort below numbers, and a missing part is 0 (2.0rc1 < 2.0)."""
+    key = [(1, int(x)) if x.isdigit() else (0, x)
+           for x in re.findall(r"\d+|[a-z]+", v.lower())]
+    return key + [(1, 0)] * (12 - len(key))
+
+
+@functools.cache
+def downstream_pins():
+    """{pins: {"name version", ...}}: how the newest version of each
+    conda-forge package pins pandoc, from current_repodata.json (linux-64
+    and noarch). That file also keeps some older versions (quarto 1.5.57
+    pins 3.2), which aren't new pins and are left out."""
+    newest = {}
+    for subdir in ("linux-64", "noarch"):
+        status, body = http(f"{CONDA_FORGE}/{subdir}/current_repodata.json",
+                            {"User-Agent": "pandoc-forge-bot"})
+        if status != 200:
+            raise SystemExit(f"conda-forge {subdir} repodata: HTTP {status}")
+        d = json.loads(body)
+        for r in [*d.get("packages", {}).values(),
+                  *d.get("packages.conda", {}).values()]:
+            k = (subdir, r["name"])
+            if k not in newest or (version_key(r["version"])
+                                   > version_key(newest[k][0]["version"])):
+                newest[k] = [r]
+            elif r["version"] == newest[k][0]["version"]:
+                newest[k].append(r)
+    found = {}
+    for records in newest.values():
+        for r in records:
+            for dep in r.get("depends", []):
+                name, _, spec = dep.partition(" ")
+                pins = name == "pandoc" and spec_pins(spec)
+                if pins:
+                    found.setdefault(pins, set()).add(f"{r['name']} {r['version']}")
+    return found
+
+
+def unbuilt_pins(versions):
+    """{pins: packages} for the downstream pins that none of `versions`
+    satisfies."""
+    return {pins: pkgs for pins, pkgs in downstream_pins().items()
+            if not any(satisfies(v, p) for v in versions for p in pins)}
+
+
+def check_downstream():
+    """An issue per downstream pin that no branch builds."""
+    built = sorted(built_versions(), key=ver, reverse=True)
+    issues = []
+    for pins, pkgs in sorted(unbuilt_pins(built).items()):
+        pin = " | ".join(pins)
+        series = ".".join(pins[0].removesuffix(".*").split(".")[:2])
+        issues.append(dict(
+            title=f"Downstream pin: pandoc {pin}",
+            body=f"On conda-forge, the newest {', '.join(sorted(pkgs))} "
+                 f"depends on `pandoc {pin}`. No branch builds it (main and "
+                 f"v*: {', '.join(built)}), so with pandoc-forge listed "
+                 "first a solver silently picks an older version of "
+                 f"{'that package' if len(pkgs) == 1 else 'those packages'}."
+                 f"\n\nTo build it, branch `v{series}.x` from `main` and "
+                 "change only `pins.env` (README: Older pandoc versions), "
+                 "then release it. If it isn't worth a branch, close this "
+                 "issue: the bot won't open it again.",
+            labels=["downstream-pin"]))
+    return issues
+
+
+# --- checks --------------------------------------------------------------
+
+def check_crossref(branch):
+    pins = read_pins()
+    current, version = pins["CROSSREF_TAG"], pins["PANDOC_VERSION"]
+    releases = crossref_releases()
+    if current not in releases:
+        return None
+    for tag in releases[:releases.index(current)]:
+        bound = crossref_bound(tag)
+        if bound and admits(bound, version):
+            break
+    else:
+        return None
+    patched = patched_bound(current)
+    switch_crossref(current, tag, version)
+    # The package is pandoc-crossref <cabal version>-pandoc<version>_..._<n>.
+    # A new cabal version starts again at build 0. The same one (v0.3.26a ->
+    # v0.3.26b) must go past the builds already published, which uploads
+    # would otherwise skip. If a version can't be read, take the safe side.
+    new_v, old_v = crossref_version(tag), crossref_version(current)
+    if new_v and old_v and new_v != old_v:
+        build = 0
+        why = "resets to 0"
+    else:
+        build = int(pins["CROSSREF_BUILD_NUMBER"]) + 1
+        why = (f"goes to {build}: {tag} has {current}'s cabal version "
+               f"({new_v}), so a lower build number names a package already "
+               "built, which the upload would skip")
+    set_pin("CROSSREF_BUILD_NUMBER", str(build))
+    return dict(
+        branch=f"bot/crossref-{tag}-{branch}",
+        title=f"{branch}: pandoc-crossref {tag}",
+        body=f"pandoc-crossref {tag} admits pandoc {version} (`{bound}`), so "
+             f"it replaces {current}"
+             + (" and our bounds patch for it is dropped" if patched else "")
+             + f". `CROSSREF_BUILD_NUMBER` {why}. The pandoc packages "
+             "already exist and are skipped on upload.",
+        labels=["crossref"])
+
+
+def check_pandoc(branch):
+    if branch != "main":
+        return None
+    rel = gh_json("release", "view", "-R", PANDOC_REPO,
+                  "--json", "tagName,publishedAt,isPrerelease")
+    pins = read_pins()
+    old, new = pins["PANDOC_VERSION"], rel["tagName"]
+    if rel["isPrerelease"] or ver(new) <= ver(old):
+        return None
+    review, labels = [], ["pandoc-release"]
+
+    with tempfile.TemporaryDirectory() as src:
+        run("git", "clone", "-q", "--filter=blob:none", "--no-checkout",
+            f"https://github.com/{PANDOC_REPO}", src)
+        show = lambda rev, f: run("git", "show", f"{rev}:{f}", cwd=src,
+                                  check=False)
+
+        def diff(*files, context="-U0"):
+            return run("git", "diff", "--no-ext-diff", "--no-color", context,
+                       old, new, "--", *files, cwd=src)
+
+        # Toolchain: the ghc-musl tag upstream's release builds use
+        def ghc_minor(rev):
+            m = re.search(r"ghc-musl:(\d+\.\d+)",
+                          show(rev, ".circleci/config.yml"))
+            return m and m.group(1)
+        old_minor, new_minor = ghc_minor(old), ghc_minor(new)
+        ghc = pins["GHC_VERSION"]
+        if new_minor and new_minor != old_minor:
+            digest = tag_digest(new_minor)
+            ghc = next((t for t in (f"{new_minor}.{p}" for p in range(20, -1, -1))
+                        if tag_digest(t) == digest), None)
+            if not ghc:
+                raise SystemExit(f"no ghc-musl tag {new_minor}.x matches "
+                                 f"ghc-musl:{new_minor}")
+            review.append(f"**GHC moved** from {old_minor} to {new_minor} "
+                          f"(`ghc-musl:{new_minor}` is GHC {ghc}). Check "
+                          "`release-candidate.yml`; the macOS and Windows "
+                          "jobs take `GHC_VERSION` too.")
+            labels.append("needs-review")
+        rc = show(new, ".github/workflows/release-candidate.yml")
+        for m in sorted(set(re.findall(r"ghc --set ([\d.]+)", rc))):
+            if not ghc.startswith(m):
+                review.append(f"`release-candidate.yml` installs GHC {m}, "
+                              f"not {ghc}.")
+                labels.append("needs-review")
+        set_pin("GHC_VERSION", ghc)
+        set_image(ghc)
+
+        # cabal-install for the macOS and Windows jobs (Linux uses the
+        # image's, as upstream does): what release-candidate.yml installs
+        cabal = pins["CABAL_VERSION"]
+        cabals = sorted(set(re.findall(r"ghcup install cabal --set ([\d.]+)",
+                                       rc)))
+        same = lambda v: cabal == v or cabal.startswith(v + ".")
+        if len(cabals) > 1:
+            review.append(f"`release-candidate.yml` installs cabal "
+                          f"{', '.join(cabals)}; `CABAL_VERSION` stays {cabal}.")
+            labels.append("needs-review")
+        elif cabals and not same(cabals[0]):
+            if cabals[0].count(".") == 3:
+                review.append(f"**cabal moved** from {cabal} to {cabals[0]} "
+                              "(`release-candidate.yml`), for the macOS and "
+                              "Windows jobs.")
+                set_pin("CABAL_VERSION", cabals[0])
+            else:
+                review.append(f"`release-candidate.yml` installs cabal "
+                              f"{cabals[0]}: set `CABAL_VERSION` to its "
+                              "exact version.")
+            labels.append("needs-review")
+
+        # pandoc API
+        apis = []
+        for rev in (old, new):
+            Path(src, "pandoc.cabal").write_text(show(rev, "pandoc.cabal"))
+            apis.append(run("bash", "scripts/pandoc-api-version.sh", src))
+        if apis[0] != apis[1]:
+            review.append(f"**pandoc API {apis[0]} → {apis[1]}.** `pandoc-api` "
+                          f"follows by itself, but every filter in "
+                          f"pandoc-forge/filters must be checked against "
+                          f"{new} and rebuilt with `pandoc_api: {apis[1]}` "
+                          "(variants.yaml) once it is released.")
+            labels.append("pandoc-api")
+
+        # The rest of upstream's diff that can need work here
+        stat = run("git", "diff", "--no-ext-diff", "--no-color", "--stat",
+                   old, new, "--", *WATCH, cwd=src)
+        # Hunks of the cabal files that touch flags or conditionals, with
+        # context (a changed "Default:" means nothing without its flag), and
+        # every change to cabal.project
+        hunks = [h for h in re.split(r"^(?=@@)", diff(
+                     "pandoc.cabal", "pandoc-cli/pandoc-cli.cabal",
+                     context="-U3"), flags=re.M)[1:]
+                 if re.search(r"^[+-].*\b(flag|default:|manual:|if )",
+                              h, re.M | re.I)]
+        project = diff("cabal.project")
+        if hunks or project:
+            review.append("Flags, conditionals or `cabal.project` changed "
+                          "(`scripts/cabal-opts.sh` sets flags explicitly):\n"
+                          "```diff\n" + "".join(hunks) + project + "\n```")
+            labels.append("needs-review")
+        if "ghc-wasm-meta" in diff("flake.lock"):
+            review.append("`flake.lock` moves ghc-wasm-meta: the wasm "
+                          "toolchain changes.")
+            labels.append("needs-review")
+        if diff("wasm"):
+            review.append("`wasm/` changed (patches, build).")
+            labels.append("needs-review")
+        if re.search(rf"^\+.*Since: {re.escape(new)}\b",
+                     diff("doc/lua-filters.md"), re.M):
+            review.append(f"New Lua API marked `Since: {new}` "
+                          "(doc/lua-filters.md): filters using it need "
+                          f"`>={new}` run constraints.")
+
+    # Downstream pins that, once main moves on, no branch would satisfy
+    old_series = ".".join(old.split(".")[:2])
+    for pins, pkgs in sorted(unbuilt_pins(built_versions() - {old} | {new})
+                             .items()):
+        if any(satisfies(old, p) for p in pins):
+            review.append(f"**On conda-forge, the newest {', '.join(sorted(pkgs))} "
+                          f"depends on `pandoc {' | '.join(pins)}`**, which "
+                          f"only {old} satisfies: branch `v{old_series}.x` "
+                          "from `main` before merging.")
+            labels.append("needs-branch")
+
+    set_pin("PANDOC_VERSION", new)
+    set_pin("INDEX_STATE", rel["publishedAt"])
+    for k in ("PANDOC_BUILD_NUMBER", "PANDOC_WASM_BUILD_NUMBER",
+              "CROSSREF_BUILD_NUMBER"):
+        set_pin(k, "0")
+    tag, note = pick_crossref(new, pins["CROSSREF_TAG"])
+    if tag != pins["CROSSREF_TAG"]:
+        switch_crossref(pins["CROSSREF_TAG"], tag, new)
+    else:
+        set_crossref(tag, new)
+        skips = carry_skips(tag, old, new)
+        if skips:
+            note += " " + skips
+    if "patches" in note:
+        labels.append("crossref-patched")
+
+    body = [f"[pandoc {new}](https://github.com/{PANDOC_REPO}/releases/tag/"
+            f"{new}), published {rel['publishedAt']} (`INDEX_STATE`). "
+            "Build numbers reset to 0.",
+            f"**pandoc-crossref:** {note}",
+            "**Upstream changes to check:** " +
+            ("none found by the bot (happy path)." if not review else ""),
+            *[f"- {r}" for r in review],
+            f"<details><summary>git diff --stat {old} {new} -- "
+            f"{' '.join(WATCH)}</summary>\n\n```\n{stat}\n```\n</details>",
+            f"**Before merging:** if a downstream package pins {old} exactly, "
+            f"or {old} is the newest pandoc with an unpatched crossref, branch "
+            f"`v{'.'.join(old.split('.')[:2])}.x` from `main` first. The PR fails "
+            "if pandoc-crossref didn't build, pass its tests or package; skip "
+            "a failing test only if pandoc's output changed. "
+            "**After merging:** check from `pandoc-forge/dev`, then release "
+            "(README: Bumping to a new pandoc release)."]
+    return dict(branch=f"bot/pandoc-{new}", title=f"pandoc {new}",
+                body="\n\n".join(body), labels=labels)
+
+
+# --- driver --------------------------------------------------------------
+
+def propose(base, pr, dry_run):
+    if not run("git", "status", "--porcelain", "--", *OWNED):
+        return
+    print(f"== {base}: {pr['title']} ({pr['branch']})")
+    if run("git", "ls-remote", "--heads", "origin", pr["branch"]):
+        print("   already proposed; skipping")
+        return
+    # An owned path can be gone from both the tree and the index, e.g.
+    # patches/ once switch_crossref removes the old tag's only directory,
+    # and git add fails on a pathspec that matches nothing.
+    run("git", "add", "-A", "--", *[p for p in OWNED if Path(p).exists()
+                                    or run("git", "ls-files", "--", p)])
+    if dry_run:
+        print(run("git", "--no-pager", "diff", "--no-ext-diff", "--cached"))
+        print(pr["body"])
+        return
+    run("git", "switch", "-q", "-c", pr["branch"])
+    run("git", "commit", "-q", "-m", pr["title"], "-m", pr["body"])
+    run("git", "push", "-q", "origin", pr["branch"])
+    labels = dict.fromkeys(pr["labels"])
+    for label in labels:
+        run("gh", "label", "create", label, "--force")
+    args = ["gh", "pr", "create", "-B", base, "-H", pr["branch"],
+            "-t", pr["title"], "-b", pr["body"]]
+    for label in labels:
+        args += ["--label", label]
+    print("  ", run(*args))
+
+
+def propose_issue(issue, dry_run):
+    print(f"== issue: {issue['title']}")
+    # Every issue, closed ones too: closing declines it for good
+    if issue["title"] in {i["title"] for i in gh_json(
+            "issue", "list", "--state", "all", "--limit", "1000",
+            "--json", "title")}:
+        print("   already opened; skipping")
+        return
+    if dry_run:
+        print(issue["body"])
+        return
+    args = ["gh", "issue", "create", "-t", issue["title"], "-b", issue["body"]]
+    for label in issue["labels"]:
+        run("gh", "label", "create", label, "--force")
+        args += ["--label", label]
+    print("  ", run(*args))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the changes instead of pushing and opening PRs")
+    ap.add_argument("branches", nargs="*")
+    a = ap.parse_args()
+    if run("git", "status", "--porcelain"):
+        raise SystemExit("bot.py: the working tree has changes, which it "
+                         "would reset; commit or stash them first")
+    branch = run("git", "branch", "--show-current")
+    start = ["git", "switch", "-q"] + (
+        [branch] if branch else ["--detach", run("git", "rev-parse", "HEAD")])
+    try:
+        propose_all(a)
+    finally:
+        run(*start)
+
+
+def propose_all(a):
+    run("git", "fetch", "-q", "origin")
+    branches = a.branches or ["main"] + [
+        b.removeprefix("origin/") for b in
+        run("git", "branch", "-r", "--format=%(refname:short)",
+            "--list", "origin/v*").split()]
+    for branch in branches:
+        for check in (check_pandoc, check_crossref):
+            run("git", "switch", "-q", "--detach", f"origin/{branch}")
+            try:
+                pr = check(branch)
+                if pr:
+                    propose(branch, pr, a.dry_run)
+            finally:
+                # Also on failure, so nothing staged follows main() back
+                # to the starting branch
+                run("git", "reset", "-q", "--hard")
+                run("git", "clean", "-qfd", "--", "patches")
+            if pr and check is check_pandoc:
+                break  # a release PR covers main's crossref too
+    if not a.branches:
+        for issue in check_downstream():
+            propose_issue(issue, a.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
