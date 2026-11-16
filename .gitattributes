@@ -1,0 +1,6 @@
+# pandoc-api's activation scripts are packaged in every CI job, Windows
+# included, and the upload keeps any one copy: fix their line endings, so
+# the copies are the same.
+recipes/pandoc-api/*.sh text eol=lf
+recipes/pandoc-api/*.ps1 text eol=lf
+recipes/pandoc-api/*.bat text eol=crlf

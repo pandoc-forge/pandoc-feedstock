@@ -50,6 +50,26 @@ tests:
           - pandoc-lua -e 'assert(tostring(pandoc.types.Version(PANDOC_VERSION)) == "${{ version }}")'
           - pandoc-server --version
           - echo | pandoc -t json | grep -q '"pandoc-api-version":\[${{ api_version | replace(".", ",") }},'
+  # pandoc 3.14 and later search PANDOC_DATA_DIRS, which pandoc-api's
+  # activation points at the environment's share/pandoc: a Lua filter
+  # installed in share/pandoc/filters is found by name. It's moved there, so
+  # that pandoc can't find it in the working directory instead.
+  - if: match(version, ">=3.14")
+    then:
+      files:
+        recipe:
+          - data-dirs-probe.lua
+      script:
+        - if: unix
+          then:
+            - mkdir -p "$CONDA_PREFIX/share/pandoc/filters"
+            - mv data-dirs-probe.lua "$CONDA_PREFIX/share/pandoc/filters/"
+            - test "$(echo x | pandoc -L data-dirs-probe.lua -t plain)" = found
+          else:
+            - if not exist "%CONDA_PREFIX%\share\pandoc\filters" mkdir "%CONDA_PREFIX%\share\pandoc\filters"
+            - move data-dirs-probe.lua "%CONDA_PREFIX%\share\pandoc\filters\"
+            - echo x | pandoc -L data-dirs-probe.lua -t plain | findstr /b found
+            - if errorlevel 1 exit 1
 
 about:
   homepage: https://pandoc.org
