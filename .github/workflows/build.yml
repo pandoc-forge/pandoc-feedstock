@@ -282,8 +282,25 @@ jobs:
           API_KEY: ${{ secrets.PREFIX_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          mapfile -d '' pkgs < <(find packages -name '*.conda' -print0)
-          printf '%s\n' "${pkgs[@]}"
+          # Only files the channel doesn't have yet. rattler-build signs a
+          # file before it learns that the channel has it, so a rebuild of a
+          # published file would get an attestation, logged publicly for
+          # good, for bytes that are never uploaded. Anything but a 200 counts
+          # as new, and --skip-existing still covers a race.
+          pkgs=()
+          while IFS= read -r -d '' p; do
+            url="https://prefix.dev/$CHANNEL/$(basename "$(dirname "$p")")/$(basename "$p")"
+            if [[ $(curl -sS -o /dev/null -I -L -A pandoc-forge-ci -w '%{http_code}' "$url") == 200 ]]; then
+              echo "Already in $CHANNEL: ${p#packages/}"
+            else
+              pkgs+=("$p")
+            fi
+          done < <(find packages -name '*.conda' -print0 | sort -z)
+          if (( ${#pkgs[@]} == 0 )); then
+            echo "::notice::Nothing to upload: $CHANNEL has every package"
+            exit 0
+          fi
+          printf 'To upload: %s\n' "${pkgs[@]#packages/}"
           upload() { rattler-build upload prefix --channel "$CHANNEL" --skip-existing "$@" "${pkgs[@]}"; }
           if upload --generate-attestation --store-github-attestation; then
             echo "::notice::Uploaded to $CHANNEL with trusted publishing and attestations"
@@ -310,6 +327,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # trusted publishing to prefix.dev, and the attestations
+      attestations: read # gh attestation verify
     env:
       DEV_CHANNEL: ${{ vars.PREFIX_DEV_CHANNEL || 'pandoc-forge/dev' }}
       CHANNEL: ${{ vars.PREFIX_RELEASE_CHANNEL || 'pandoc-forge' }}
